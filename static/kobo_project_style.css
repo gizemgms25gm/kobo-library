@@ -1,0 +1,259 @@
+:root {
+    --bg-color: #f2efe9;
+    --text-color: #1a1a1a;
+    --card-bg: #ffffff;
+    --border-color: #e2ded7;
+    --text-muted: #777777;
+    --accent-color: #007aff;
+    --note-color: #ff9500;
+}
+
+body.dark-mode {
+    --bg-color: #121212;
+    --text-color: #f0f0f0;
+    --card-bg: #1e1e1e;
+    --border-color: #2c2c2c;
+    --text-muted: #aaaaaa;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Header & Logo */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 40px;
+}
+
+.logo {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text-color);
+    letter-spacing: -0.5px;
+}
+
+.logo span {
+    font-family: "Georgia", serif;
+    font-style: italic;
+    font-weight: 400;
+    color: #c48b53;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.search-box input {
+    width: 220px;
+    padding: 8px 18px;
+    border-radius: 25px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    font-size: 0.88rem;
+    outline: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+body.dark-mode .search-box input {
+    background: rgba(40, 40, 40, 0.85);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* iOS Switch */
+.ios-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+
+.ios-switch input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #e2ded7;
+    transition: .3s;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+input:checked + .slider { background-color: #34c759; }
+input:checked + .slider:before { transform: translateX(20px); }
+.slider.round { border-radius: 34px; }
+.slider.round:before { border-radius: 50%; }
+
+/* Grid Düzeni - Sabit kibar genişlik */
+.main-container {
+    max-width: 1100px;
+    margin: 10px auto;
+    padding: 0 20px;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 165px); /* Kart genişliği 165px ile sınırlandırıldı */
+    gap: 20px;
+    justify-content: flex-start;
+}
+
+/* Kitap Kartı Tasarımı - Kompakt Roman Boyutu */
+.kitap-karti {
+    width: 165px;
+    background-color: var(--card-bg);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    border: 1px solid var(--border-color);
+}
+
+.kitap-karti:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 18px rgba(0,0,0,0.12);
+}
+
+.kapak-container {
+    width: 100%;
+    height: 240px; /* Sabit kapak yüksekliği */
+    overflow: hidden;
+    background-color: rgba(0,0,0,0.03);
+}
+
+.kitap-kapak {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Kart Altındaki Bilgi Kutusu */
+.kitap-bilgi {
+    padding: 10px 12px;
+}
+
+.kitap-baslik {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 3px 0;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kitap-yazar {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0 0 8px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sayfa-cizgi {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+/* Alt İkon Satırı: " 67   📝 7 */
+.stats-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.custom-icon {
+    width: 12px;
+    height: 12px;
+    color: var(--text-color);
+}
+
+/* Detay Paneli Stilleri */
+.detay-container {
+    max-width: 750px;
+    margin: 0 auto;
+}
+
+.btn-back {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+
+.alinti-karti {
+    background: var(--card-bg);
+    border-left: 4px solid var(--accent-color);
+    padding: 16px;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    border-top: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.alinti-karti.not-karti {
+    border-left-color: var(--note-color);
+}
+
+.alinti-metni {
+    font-style: italic;
+    margin: 0 0 8px 0;
+    line-height: 1.5;
+}
+
+.kullanici-notu {
+    background: rgba(255, 149, 0, 0.12);
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: var(--note-color);
+    font-size: 0.88rem;
+    margin-top: 6px;
+}
+
+.alinti-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 10px;
+}

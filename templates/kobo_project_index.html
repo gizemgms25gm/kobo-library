@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kobo Library</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='kobo_project_style.css') }}">
+</head>
+<body>
+
+    <header class="app-header">
+        <div class="logo">
+            Kobo <span>Library</span>
+        </div>
+
+        <div class="header-right">
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Kitap veya yazar ara..." onkeyup="kitapFiltrele()">
+            </div>
+
+            <label class="ios-switch">
+                <input type="checkbox" id="theme-toggle">
+                <span class="slider round"></span>
+            </label>
+        </div>
+    </header>
+
+    <main class="main-container">
+        
+        <div id="ana-kitaplik-view">
+            <div id="kitap-listesi" class="grid-container">
+                <!-- Kitap Kartları JS ile yüklenecek -->
+            </div>
+        </div>
+
+        <div id="kitap-detay-view" style="display: none;" class="detay-container">
+            <button id="btn-geri-don" class="btn-back">← Kitaplığa Dön</button>
+            
+            <div class="detay-header">
+                <h2 id="detay-kitap-adi">Kitap Adı</h2>
+                <p id="detay-yazar-adi">Yazar Adı</p>
+            </div>
+
+            <hr class="detay-ayrac">
+
+            <div id="alinti-not-listesi" class="alinti-listesi">
+                <!-- Alıntı içerikleri buraya yüklenecek -->
+            </div>
+        </div>
+
+    </main>
+
+    <script src="{{ url_for('static', filename='kobo_project_script.js') }}"></script>
+</body>
+</html>
