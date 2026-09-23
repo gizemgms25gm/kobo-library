@@ -51,7 +51,6 @@ function kitaplariYukle() {
         listeContainer.innerHTML = '<p class="yukleniyor">Kütüphane taranıyor ve kitaplar yükleniyor...</p>';
     }
 
-    // Tarayıcı önbelleğini aşmak için timestamp ekliyoruz
     fetch(`/api/kitaplar?t=${Date.now()}`)
         .then(res => res.json())
         .then(kitaplar => {
@@ -86,7 +85,7 @@ function kitapKartlariniCiz(kitapListesi) {
 
         kart.innerHTML = `
             <div class="kapak-container">
-                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak" loading="lazy" onerror="this.src='/static/covers/placeholder.svg'">
+                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak" loading="lazy">
             </div>
             <div class="kitap-bilgi">
                 <h3 class="kitap-baslik" title="${kitap.kitap_adi}">${kitap.kitap_adi}</h3>
@@ -122,9 +121,23 @@ function kitapDetayGoster(kitap) {
 
     fetch(`/api/kitap-detay/${encodeURIComponent(kitap.volume_id)}?t=${Date.now()}`)
         .then(res => res.json())
-        .then(detaylar => {
-            aktifDetaylar = detaylar || [];
+        .then(data => {
+            aktifDetaylar = data.detaylar || [];
             
+            // EPUB indirme butonunu yönet
+            const epubBtn = document.getElementById('btn-download-epub');
+            if (epubBtn) {
+                if (data.epub_indir_url) {
+                    epubBtn.href = data.epub_indir_url;
+                    epubBtn.style.display = 'inline-flex';
+                } else if (kitap.epub_indir_url) {
+                    epubBtn.href = kitap.epub_indir_url;
+                    epubBtn.style.display = 'inline-flex';
+                } else {
+                    epubBtn.style.display = 'none';
+                }
+            }
+
             // Sayaçları güncelle
             const alintiSayisi = aktifDetaylar.filter(d => d.tur === 'alinti').length;
             const notSayisi = aktifDetaylar.filter(d => d.tur === 'not').length;
@@ -135,7 +148,6 @@ function kitapDetayGoster(kitap) {
             document.getElementById('count-not').innerText = notSayisi;
             document.getElementById('count-yer_imi').innerText = yerImiSayisi;
 
-            // Varsayılan filtre: all
             filtreDegistir('all', document.querySelector('.filter-tab[data-filter="all"]'));
         })
         .catch(err => {
@@ -234,7 +246,7 @@ function koboEsitle() {
         btnSync.disabled = true;
     }
 
-    toastGoster("Kobo taranıyor ve yeni kitaplar aktarılıyor...", "info");
+    toastGoster("Kobo taranıyor; veritabanı, kapaklar ve EPUB kitapları aktarılıyor...", "info");
 
     fetch(`/api/kobo-esitle?t=${Date.now()}`, { method: 'POST' })
         .then(res => res.json())
@@ -245,7 +257,6 @@ function koboEsitle() {
                     mesaj += " 🚀 GitHub'a da yedeklendi.";
                 }
                 toastGoster(mesaj, "success");
-                // Kitapları anında sayfayı yenilemeden güncelle
                 kitaplariYukle();
             } else {
                 toastGoster(data.mesaj, "error");
@@ -272,5 +283,5 @@ function toastGoster(mesaj, tip = 'info') {
 
     setTimeout(() => {
         toast.className = 'toast-notification';
-    }, 4500);
+    }, 5500);
 }

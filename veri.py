@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, send_from_directory
 import sqlite3
 import os
 import shutil
@@ -16,14 +16,19 @@ app = Flask(__name__, static_folder='static')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'KoboReaderData_Deneme.sqlite')
 
-# Git ve Komut Satırı Yolları
-LOCAL_GIT_CMD = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Git', 'cmd')
-if os.path.exists(LOCAL_GIT_CMD) and LOCAL_GIT_CMD not in os.environ.get('PATH', ''):
-    os.environ['PATH'] += os.pathsep + LOCAL_GIT_CMD
+# Kitap Dosyaları ve Kapaklar Dizinleri
+BOOKS_DIR = os.path.join(BASE_DIR, 'books')
+if not os.path.exists(BOOKS_DIR):
+    os.makedirs(BOOKS_DIR)
 
 COVERS_DIR = os.path.join(BASE_DIR, 'static', 'covers')
 if not os.path.exists(COVERS_DIR):
     os.makedirs(COVERS_DIR)
+
+# Git ve Komut Satırı Yolları
+LOCAL_GIT_CMD = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Git', 'cmd')
+if os.path.exists(LOCAL_GIT_CMD) and LOCAL_GIT_CMD not in os.environ.get('PATH', ''):
+    os.environ['PATH'] += os.pathsep + LOCAL_GIT_CMD
 
 CACHE_SOZLUGU = {}
 
@@ -70,6 +75,63 @@ def kobo_surucusu_bul():
                 if os.path.exists(yol):
                     return surucu, yol
     return None, None
+
+
+def kobo_kitap_dosyalarini_kopyala(surucu_koku):
+    """Kobo cihazındaki tüm .epub, .kepub.epub ve kitap dosyalarını yerel 'books/' klasörüne ve buluta kopyalar."""
+    if not surucu_koku:
+        return 0, []
+    
+    kopyalanan = 0
+    kopyalanan_listesi = []
+    
+    # Bulut klasörleri tespiti
+    kullanici_dizini = os.path.expanduser("~")
+    bulut_kitap_dizinleri = [
+        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Library_Books"),
+        os.path.join(kullanici_dizini, "OneDrive", "Kobo_Library_Books"),
+        os.path.join("G:\\", "My Drive", "Kobo_Library_Books")
+    ]
+    aktif_bulut_dizini = None
+    for b_dizin in bulut_kitap_dizinleri:
+        try:
+            ana_dizin = os.path.dirname(b_dizin)
+            if os.path.exists(ana_dizin):
+                if not os.path.exists(b_dizin):
+                    os.makedirs(b_dizin)
+                aktif_bulut_dizini = b_dizin
+                break
+        except Exception:
+            pass
+
+    try:
+        for root, dirs, files in os.walk(surucu_koku):
+            # Sistem klasörlerini (.kobo) atla
+            dirs[:] = [d for d in dirs if not d.startswith('.kobo')]
+            for file in files:
+                ext = file.lower()
+                if ext.endswith('.epub') or ext.endswith('.kepub.epub') or ext.endswith('.pdf') or ext.endswith('.mobi'):
+                    kaynak = os.path.join(root, file)
+                    hedef_yerel = os.path.join(BOOKS_DIR, file)
+                    
+                    # Yerel 'books/' klasörüne kopyala
+                    if not os.path.exists(hedef_yerel) or os.path.getsize(hedef_yerel) != os.path.getsize(kaynak):
+                        shutil.copy2(kaynak, hedef_yerel)
+                        kopyalanan += 1
+                        kopyalanan_listesi.append(file)
+                    
+                    # Bulut Drive klasörüne kopyala (Google Drive / OneDrive)
+                    if aktif_bulut_dizini:
+                        try:
+                            hedef_bulut = os.path.join(aktif_bulut_dizini, file)
+                            if not os.path.exists(hedef_bulut) or os.path.getsize(hedef_bulut) != os.path.getsize(kaynak):
+                                shutil.copy2(kaynak, hedef_bulut)
+                        except Exception as e:
+                            print(f"Buluta dosya kopyalama uyarısı ({file}):", e)
+    except Exception as e:
+        print("Kitap dosyaları taranırken uyarı:", e)
+
+    return kopyalanan, kopyalanan_listesi
 
 
 def kobo_cihaz_kapaklarini_kopyala(surucu_koku):
@@ -301,20 +363,41 @@ def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi, image_id=""):
     return f"https://placehold.co/400x600/2C2A29/FFFFFF?text={urllib.parse.quote(kitap_adi)}"
 
 
+def yerel_epub_dosyasi_bul(content_id, title):
+    """'books/' klasöründe kitaba ait bir .epub / .kepub.epub dosyası var mı kontrol eder."""
+    if not os.path.exists(BOOKS_DIR):
+        return None
+        
+    # ContentID'deki dosya adı (Örn: file:///mnt/onboard/...)
+    if content_id and 'file://' in content_id:
+        ham_isim = os.path.basename(urllib.parse.unquote(content_id.replace('file://', '').replace('/mnt/onboard/', '')))
+        yerel_yol = os.path.join(BOOKS_DIR, ham_isim)
+        if os.path.exists(yerel_yol):
+            return ham_isim
+
+    # Başlık üzerinden arama
+    clean_title = re.sub(r'[^\w]', '', title).lower()
+    for dosya in os.listdir(BOOKS_DIR):
+        clean_file = re.sub(r'[^\w]', '', dosya).lower()
+        if clean_title and (clean_title in clean_file or clean_file in clean_title):
+            return dosya
+            
+    return None
+
+
 def kitap_meta_cozumle(kitap_ham):
-    """Tek bir kitap için sayfa sayısını (Kobo veritabanı kelime sayısından tam hesaplayarak) ve kapağını hazırlar."""
+    """Tek bir kitap için sayfa sayısını, kapağını ve varsa indirilebilir EPUB dosyasını hazırlar."""
     content_id, title, author, store_pages, num_pages, image_id, word_count, alinti_sayisi, not_sayisi, yer_imi_sayisi, idx = kitap_ham
     yazar = author if author and author.strip() else "Bilinmeyen Yazar"
     cache_key = f"{title}_{yazar}"
     
-    # 1. Sayfa Sayısı Hesaplama Mantığı (Veritabanından & Hızlı)
+    # 1. Sayfa Sayısı Hesaplama Mantığı
     sayfa_sayisi_sayi = 0
     if store_pages and isinstance(store_pages, int) and store_pages > 0:
         sayfa_sayisi_sayi = store_pages
     elif num_pages and isinstance(num_pages, int) and num_pages > 0:
         sayfa_sayisi_sayi = num_pages
     elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
-        # Standart yayıncılık kuralı: 1 sayfa ≈ 260 kelime
         sayfa_sayisi_sayi = max(1, round(word_count / 260))
 
     if cache_key in CACHE_SOZLUGU:
@@ -336,6 +419,7 @@ def kitap_meta_cozumle(kitap_ham):
         }
 
     sayfa_metni = f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—"
+    epub_dosyasi = yerel_epub_dosyasi_bul(content_id, title)
 
     return {
         "id": idx,
@@ -348,7 +432,9 @@ def kitap_meta_cozumle(kitap_ham):
         "toplam_sayfa": sayfa_sayisi_sayi,
         "alinti_sayisi": alinti_sayisi,
         "not_sayisi": not_sayisi,
-        "yer_imi_sayisi": yer_imi_sayisi
+        "yer_imi_sayisi": yer_imi_sayisi,
+        "epub_dosya_adi": epub_dosyasi,
+        "epub_indir_url": f"/api/kitap-indir/{urllib.parse.quote(epub_dosyasi)}" if epub_dosyasi else None
     }
 
 
@@ -359,7 +445,6 @@ def kobo_kitaplarini_getir():
     baglanti = sqlite3.connect(DB_PATH)
     imlec = baglanti.cursor()
     
-    # Tüm Kobo kitaplarını ve kelime sayılarını al
     sorgu = """
     SELECT c.ContentID, c.Title, c.Attribution, c.StorePages, c.___NumPages, c.ImageId,
            (SELECT SUM(w.WordCount) FROM content w WHERE w.BookID = c.ContentID AND w.WordCount > 0) as total_words,
@@ -394,7 +479,6 @@ def kobo_kitaplarini_getir():
         content_id, title, author, store_pages, num_pages, image_id, word_count, alinti, notlar, yer_imi = row
         kitap_ham_listesi.append((content_id, title, author, store_pages, num_pages, image_id, word_count, alinti, notlar, yer_imi, idx))
 
-    # Hızlı paralel çözümleme
     with ThreadPoolExecutor(max_workers=8) as executor:
         kitaplar = list(executor.map(kitap_meta_cozumle, kitap_ham_listesi))
 
@@ -421,6 +505,13 @@ def api_cihaz_durumu():
     })
 
 
+@app.route('/api/kitap-indir/<path:dosya_adi>')
+def api_kitap_indir(dosya_adi):
+    """'books/' klasöründeki EPUB / Kepub dosyasını doğrudan indirtir."""
+    guvenli_dosya = urllib.parse.unquote(dosya_adi)
+    return send_from_directory(BOOKS_DIR, guvenli_dosya, as_attachment=True)
+
+
 @app.route('/api/kobo-esitle', methods=['POST', 'GET'])
 def api_kobo_esitle():
     surucu, kobo_yolu = kobo_surucusu_bul()
@@ -437,16 +528,22 @@ def api_kobo_esitle():
         # 2. Cihazın içindeki kapakları (Wattpad/özel kitaplar dahil) kopyalama
         kopyalanan_kapak = kobo_cihaz_kapaklarini_kopyala(surucu)
         
-        # 3. Önbelleği temizleme
+        # 3. Cihazdaki tüm EPUB dosyalarını 'books/' klasörüne ve Bulut Klasörüne aktarma
+        kopyalanan_kitap_sayisi, kitap_listesi = kobo_kitap_dosyalarini_kopyala(surucu)
+        
+        # 4. Önbelleği temizleme
         CACHE_SOZLUGU.clear()
         
-        # 4. Bulut ve GitHub senkronizasyonu
+        # 5. Bulut ve GitHub senkronizasyonu
         yedek_raporu = bulut_ve_git_yedekle()
+        
+        mesaj = f"Kobo veritabanı eşitlendi! 📚 {kopyalanan_kitap_sayisi} kitap dosyası (EPUB) ve {kopyalanan_kapak} kapak yedeklendi."
         
         return jsonify({
             "basarili": True,
-            "mesaj": f"Veritabanı Kobo'dan başarıyla eşitlendi! ({kopyalanan_kapak} yeni kapak aktarıldı)",
+            "mesaj": mesaj,
             "kaynak": kobo_yolu,
+            "kopyalanan_kitap_sayisi": kopyalanan_kitap_sayisi,
             "github_yedek": yedek_raporu["github"],
             "cloud_drive_yedek": yedek_raporu["cloud_drive"]
         })
@@ -476,6 +573,7 @@ def api_kitap_detay(volume_id):
     kitap_bilgi = imlec.fetchone()
     
     toplam_sayfa = 0
+    title = ""
     if kitap_bilgi:
         title, author, num_pages, store_pages, total_words = kitap_bilgi
         if store_pages and isinstance(store_pages, int) and store_pages > 0:
@@ -535,7 +633,12 @@ def api_kitap_detay(volume_id):
             "ilerleme": ilerleme_metni
         })
         
-    return jsonify(detay_listesi)
+    epub_dosyasi = yerel_epub_dosyasi_bul(volume_id, title)
+    
+    return jsonify({
+        "detaylar": detay_listesi,
+        "epub_indir_url": f"/api/kitap-indir/{urllib.parse.quote(epub_dosyasi)}" if epub_dosyasi else None
+    })
 
 
 if __name__ == '__main__':
