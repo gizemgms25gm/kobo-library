@@ -2,5 +2,7 @@
     "bulut_yedek_aktif": true,
     "bulut_tipi": "google_drive",
     "ozel_yedek_klasoru": "",
-    "github_yedek_aktif": true
+    "github_yedek_aktif": true,
+    "sadece_indirilenler": true,
+    "sayfa_hesap_modu": "kobo_kelime"
 }

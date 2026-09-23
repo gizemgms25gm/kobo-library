@@ -597,3 +597,26 @@ body.dark-mode .current-cloud-path {
     border-radius: 10px;
     cursor: pointer;
 }
+
+.btn-small {
+    background: rgba(0, 122, 255, 0.12);
+    color: var(--accent-color);
+    border: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-small:hover {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.form-help {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}

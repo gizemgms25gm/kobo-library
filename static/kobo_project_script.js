@@ -283,6 +283,8 @@ function ayarlariAc() {
         .then(res => res.json())
         .then(data => {
             const ayarlar = data.ayarlar || {};
+            document.getElementById('setting-page-mode').value = ayarlar.sayfa_hesap_modu || 'kobo_kelime';
+            document.getElementById('setting-only-downloaded').checked = ayarlar.sadece_indirilenler !== false;
             document.getElementById('setting-cloud-enabled').checked = ayarlar.bulut_yedek_aktif !== false;
             document.getElementById('setting-cloud-type').value = ayarlar.bulut_tipi || 'otomatik';
             document.getElementById('setting-custom-path').value = ayarlar.ozel_yedek_klasoru || '';
@@ -293,7 +295,7 @@ function ayarlariAc() {
                 pathText.innerText = data.aktif_bulut_dizini;
                 pathText.style.color = '#34c759';
             } else {
-                pathText.innerText = 'Bulut klasörü henüz bulunamadı';
+                pathText.innerText = 'Bulut klasörü bulunamadı (Özel yol belirtebilirsiniz)';
                 pathText.style.color = '#ff9500';
             }
 
@@ -315,12 +317,44 @@ function bulutTipiDegisti() {
     const tip = document.getElementById('setting-cloud-type').value;
     const customGroup = document.getElementById('custom-path-group');
     if (customGroup) {
-        customGroup.style.display = (tip === 'ozel') ? 'block' : 'none';
+        customGroup.style.display = (tip === 'ozel' || tip === 'google_drive') ? 'block' : 'none';
+        if (tip === 'google_drive') {
+            document.getElementById('setting-custom-path').placeholder = "Google Drive klasör yolunuz (Varsayılan bulunamazsa burası kullanılır)";
+        } else if (tip === 'ozel') {
+            document.getElementById('setting-custom-path').placeholder = "Örn: D:\\Yedeklerim\\Kobo_Kitaplar";
+        }
     }
+}
+
+function bulutTestEt() {
+    const yol = document.getElementById('setting-custom-path').value.trim();
+    toastGoster("Bulut klasörü erişimi test ediliyor...", "info");
+
+    fetch('/api/bulut-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ yol: yol })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.basarili) {
+            toastGoster("✅ " + data.mesaj, "success");
+            const pathText = document.getElementById('detected-path-text');
+            pathText.innerText = data.yol;
+            pathText.style.color = '#34c759';
+        } else {
+            toastGoster("❌ " + data.mesaj, "error");
+        }
+    })
+    .catch(err => {
+        toastGoster("Test sırasında bağlantı hatası oluştu.", "error");
+    });
 }
 
 function ayarlariKaydet() {
     const payload = {
+        sayfa_hesap_modu: document.getElementById('setting-page-mode').value,
+        sadece_indirilenler: document.getElementById('setting-only-downloaded').checked,
         bulut_yedek_aktif: document.getElementById('setting-cloud-enabled').checked,
         bulut_tipi: document.getElementById('setting-cloud-type').value,
         ozel_yedek_klasoru: document.getElementById('setting-custom-path').value.trim(),
@@ -335,8 +369,9 @@ function ayarlariKaydet() {
     .then(res => res.json())
     .then(data => {
         if (data.basarili) {
-            toastGoster("⚙️ Ayarlar başarıyla kaydedildi!", "success");
+            toastGoster("⚙️ Ayarlar kaydedildi ve uygulandı!", "success");
             ayarlariKapat();
+            kitaplariYukle(); // Değişen filtrelere ve sayfa moduna göre kitapları yeniden yükle
         } else {
             toastGoster("Ayarlar kaydedilirken hata oluştu.", "error");
         }
