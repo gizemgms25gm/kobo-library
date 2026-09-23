@@ -620,3 +620,117 @@ body.dark-mode .current-cloud-path {
     color: var(--text-muted);
     margin-top: 4px;
 }
+
+/* Detay Başlık ve Kapak Kartı */
+.detay-header-card {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 24px;
+    background: var(--card-bg);
+    padding: 20px 24px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.detay-kapak-wrapper {
+    position: relative;
+    width: 85px;
+    height: 125px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.detay-kapak-resmi {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.2s ease;
+}
+
+.detay-kapak-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-align: center;
+    padding: 4px 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.detay-kapak-wrapper:hover .detay-kapak-overlay {
+    opacity: 1;
+}
+
+.detay-kapak-wrapper:hover .detay-kapak-resmi {
+    transform: scale(1.05);
+}
+
+.detay-meta-info {
+    flex: 1;
+}
+
+.detay-meta-info h2 {
+    margin: 0 0 6px 0;
+    font-size: 1.5rem;
+    color: var(--text-color);
+    font-weight: 700;
+}
+
+.detay-meta-info p {
+    margin: 0 0 8px 0;
+    font-size: 1.05rem;
+    color: var(--text-muted);
+}
+
+.detay-sayfa-rozet {
+    display: inline-block;
+    background: rgba(0, 122, 255, 0.08);
+    color: var(--accent-color);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Kapak Değiştirme Sekmeleri */
+.kapak-secenek-tabs {
+    display: flex;
+    gap: 8px;
+    background: rgba(0,0,0,0.04);
+    padding: 4px;
+    border-radius: 10px;
+}
+
+body.dark-mode .kapak-secenek-tabs {
+    background: rgba(255,255,255,0.06);
+}
+
+.kapak-tab {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.kapak-tab.active {
+    background: var(--card-bg);
+    color: var(--text-color);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}

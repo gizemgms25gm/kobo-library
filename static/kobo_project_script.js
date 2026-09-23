@@ -1,6 +1,7 @@
 let tumKitaplar = [];
 let aktifDetaylar = [];
 let aktifFiltre = 'all';
+let aktifKitap = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     kitaplariYukle();
@@ -114,6 +115,7 @@ function kitapKartlariniCiz(kitapListesi) {
 }
 
 function kitapDetayGoster(kitap) {
+    aktifKitap = kitap;
     detayGörünümünüAc(kitap);
     
     const alintiListesi = document.getElementById('alinti-not-listesi');
@@ -124,6 +126,13 @@ function kitapDetayGoster(kitap) {
         .then(data => {
             aktifDetaylar = data.detaylar || [];
             
+            // Eğer detay apisinden güncel kapak veya başlık geldiyse
+            if (data.kapak_url) {
+                kitap.kapak_url = data.kapak_url;
+                const detayKapakImg = document.getElementById('detay-kapak-img');
+                if (detayKapakImg) detayKapakImg.src = data.kapak_url;
+            }
+
             // EPUB indirme butonunu yönet
             const epubBtn = document.getElementById('btn-download-epub');
             if (epubBtn) {
@@ -216,12 +225,21 @@ function detayListesiniCiz() {
 }
 
 function detayGörünümünüAc(kitap) {
+    aktifKitap = kitap;
     document.getElementById('ana-kitaplik-view').style.display = 'none';
     const detayView = document.getElementById('kitap-detay-view');
     detayView.style.display = 'block';
 
     document.getElementById('detay-kitap-adi').innerText = kitap.kitap_adi;
     document.getElementById('detay-yazar-adi').innerText = kitap.yazar;
+    
+    const detayKapakImg = document.getElementById('detay-kapak-img');
+    if (detayKapakImg) detayKapakImg.src = kitap.kapak_url;
+
+    const sayfaRozet = document.getElementById('detay-sayfa-bilgi');
+    if (sayfaRozet) {
+        sayfaRozet.innerText = (kitap.sayfa_sayisi && kitap.sayfa_sayisi !== '—') ? `📖 ${kitap.sayfa_sayisi}` : '';
+    }
 }
 
 function anaKitaplikGörünümünüAc() {
@@ -236,6 +254,138 @@ function kitapFiltrele() {
         k.yazar.toLowerCase().includes(query)
     );
     kitapKartlariniCiz(filtrelenen);
+}
+
+// --- Kapak Değiştirme Modalı ---
+let seciliKapakSekmesi = 'url';
+
+function kapakModalAc() {
+    if (!aktifKitap) return;
+    const modal = document.getElementById('kapak-modal');
+    if (!modal) return;
+
+    document.getElementById('kapak-modal-kitap-adi').innerText = `📖 ${aktifKitap.kitap_adi} - ${aktifKitap.yazar}`;
+    document.getElementById('input-kapak-url').value = '';
+    document.getElementById('input-kapak-dosya').value = '';
+    
+    const onizleme = document.getElementById('kapak-onizleme-img');
+    onizleme.src = aktifKitap.kapak_url;
+    onizleme.style.display = 'block';
+
+    kapakTabDegistir('url');
+    modal.style.display = 'flex';
+}
+
+function kapakModalKapat() {
+    const modal = document.getElementById('kapak-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function kapakTabDegistir(tab) {
+    seciliKapakSekmesi = tab;
+    const btnUrl = document.getElementById('tab-btn-url');
+    const btnDosya = document.getElementById('tab-btn-dosya');
+    const divUrl = document.getElementById('kapak-tab-url');
+    const divDosya = document.getElementById('kapak-tab-dosya');
+
+    if (tab === 'url') {
+        btnUrl.classList.add('active');
+        btnDosya.classList.remove('active');
+        divUrl.style.display = 'block';
+        divDosya.style.display = 'none';
+    } else {
+        btnDosya.classList.add('active');
+        btnUrl.classList.remove('active');
+        divDosya.style.display = 'block';
+        divUrl.style.display = 'none';
+    }
+}
+
+function kapakOnizleUrl() {
+    const url = document.getElementById('input-kapak-url').value.trim();
+    const img = document.getElementById('kapak-onizleme-img');
+    if (url) {
+        img.src = url;
+        img.style.display = 'block';
+    }
+}
+
+function kapakOnizleDosya(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = document.getElementById('kapak-onizleme-img');
+            img.src = e.target.result;
+            img.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function kapakKaydet() {
+    if (!aktifKitap) return;
+    const btnKaydet = document.getElementById('btn-kapak-kaydet');
+    if (btnKaydet) {
+        btnKaydet.disabled = true;
+        btnKaydet.innerText = 'Kaydediliyor...';
+    }
+
+    const formData = new FormData();
+    formData.append('kitap_adi', aktifKitap.ham_baslik || aktifKitap.kitap_adi);
+    formData.append('volume_id', aktifKitap.volume_id);
+
+    if (seciliKapakSekmesi === 'url') {
+        const url = document.getElementById('input-kapak-url').value.trim();
+        if (!url) {
+            toastGoster("Lütfen geçerli bir resim linki girin.", "error");
+            if (btnKaydet) { btnKaydet.disabled = false; btnKaydet.innerText = 'Kapağı Kaydet'; }
+            return;
+        }
+        formData.append('resim_url', url);
+    } else {
+        const fileInput = document.getElementById('input-kapak-dosya');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            toastGoster("Lütfen bilgisayarınızdan bir resim dosyası seçin.", "error");
+            if (btnKaydet) { btnKaydet.disabled = false; btnKaydet.innerText = 'Kapağı Kaydet'; }
+            return;
+        }
+        formData.append('dosya', fileInput.files[0]);
+    }
+
+    fetch('/api/kapak-degistir', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.basarili && data.yeni_kapak_url) {
+            aktifKitap.kapak_url = data.yeni_kapak_url;
+            
+            // Detay görünümündeki kapağı güncelle
+            const detayImg = document.getElementById('detay-kapak-img');
+            if (detayImg) detayImg.src = data.yeni_kapak_url;
+            
+            // Tüm kitaplar listesinde ilgili kitabı güncelle
+            const found = tumKitaplar.find(k => k.volume_id === aktifKitap.volume_id);
+            if (found) found.kapak_url = data.yeni_kapak_url;
+            
+            toastGoster("✅ " + data.mesaj, "success");
+            kapakModalKapat();
+        } else {
+            toastGoster("❌ " + (data.mesaj || "Kapak kaydedilemedi."), "error");
+        }
+    })
+    .catch(err => {
+        console.error("Kapak yükleme hatası:", err);
+        toastGoster("Kapak güncellenirken bir hata oluştu.", "error");
+    })
+    .finally(() => {
+        if (btnKaydet) {
+            btnKaydet.disabled = false;
+            btnKaydet.innerText = 'Kapağı Kaydet';
+        }
+    });
 }
 
 // --- Kobo Cihaz Eşitleme ---

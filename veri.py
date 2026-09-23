@@ -346,14 +346,60 @@ def bulut_ve_git_yedekle():
     return rapor
 
 
+def normalize_text(text):
+    """Arama karşılaştırması için Türkçe karakterleri normalize eder."""
+    if not text:
+        return ""
+    tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+    text = text.translate(tr_map).lower()
+    return re.sub(r'[^a-z0-9\s]', ' ', text).strip()
+
+
+def baslik_ve_yazar_temizle(raw_title, raw_author=""):
+    """Sideloaded EPUB dosyalarındaki sürüm/etiket kalıntılarını temizler, başlıktaki yazarı ayrıştırır."""
+    title = (raw_title or '').strip()
+    author = (raw_author or '').strip()
+    if author.lower() in ['bilinmeyen yazar', 'unknown', '']:
+        author = ''
+
+    # @ayisigikitap, @group gibi etiketleri kaldır
+    title = re.sub(r'@[a-zA-Z0-9_-]+', '', title)
+    # .m.N, .kepub.epub, .epub, .pdf eklerini kaldır
+    title = re.sub(r'\.(m\.[A-Z0-9]+|kepub|epub|pdf)', '', title, flags=re.IGNORECASE)
+    # (düzenleniyor), (tamamlandı) gibi durum notlarını kaldır
+    title = re.sub(r'\((?:düzenleniyor|tamamlandı|taslak)[^\)]*\)', '', title, flags=re.IGNORECASE)
+    
+    # Yazar başlıktaysa ayrıştır (Örn: "Ben, Kirke - Madeline Miller", "Yarış Çizgisi-Simone Soltani.Lights Out #1")
+    if not author:
+        match_dash = re.search(r'^(.*?)\s*[-–—]\s*([A-Za-zÇĞİÖŞÜçğıöşü\s\.]+)(?:\.([^\.]+.*))?$', title)
+        if match_dash:
+            cand_title = match_dash.group(1).strip()
+            cand_author = match_dash.group(2).strip()
+            words = cand_author.split()
+            if 1 <= len(words) <= 4 and not any(w.lower() in ['wattpad', 'epug', 'kepub', 'part', 'bölüm'] for w in words):
+                title = cand_title
+                author = cand_author
+        else:
+            match_complex = re.search(r'^([^\-]+)-([A-Za-zÇĞİÖŞÜçğıöşü\s]+)(?:\.(.*))?$', title)
+            if match_complex:
+                title = match_complex.group(1).strip()
+                author = match_complex.group(2).strip()
+
+    clean_search_title = re.sub(r'#\d+', '', title)
+    clean_search_title = re.sub(r'[-–—].*$', '', clean_search_title).strip()
+
+    return title.strip(), (author.strip() if author else 'Bilinmeyen Yazar'), clean_search_title
+
+
 def internet_sayfa_ara(kitap_adi, yazar_adi):
     """Google Books ve Open Library üzerinden sayfa sayısı ve kapak arar."""
-    clean_title = re.sub(r'[^\w\s]', '', kitap_adi).strip()
+    temiz_baslik, temiz_yazar, arama_basligi = baslik_ve_yazar_temizle(kitap_adi, yazar_adi)
+    norm_author = temiz_yazar if temiz_yazar != "Bilinmeyen Yazar" else ""
+    sorgu = f"{arama_basligi} {norm_author}".strip()
     
     try:
-        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
         url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(sorgu)}&limit=1"
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
         if res.status_code == 200:
             docs = res.json().get('docs', [])
             if docs:
@@ -369,7 +415,6 @@ def internet_sayfa_ara(kitap_adi, yazar_adi):
         pass
 
     try:
-        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
         url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(sorgu)}&maxResults=1"
         headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
         res = requests.get(url, headers=headers, timeout=2)
@@ -451,7 +496,7 @@ def şık_svg_kapak_uret(kitap_adi, yazar_adi, dosya_yolu):
 
 
 def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi, image_id=""):
-    """Kitap kapağını yerelde, cihaz önbelleğinde, iTunes veya OpenLibrary'de arar; bulunamazsa SVG üretir."""
+    """Kitap kapağını yerelde, cihaz önbelleğinde, iTunes veya OpenLibrary'de doğrulanmış olarak arar; bulunamazsa SVG üretir."""
     safe_title = re.sub(r'[^\w]', '_', kitap_adi).strip('_')
     dosya_adi_jpg = f"{safe_title}.jpg"
     dosya_adi_svg = f"{safe_title}.svg"
@@ -459,40 +504,100 @@ def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi, image_id=""):
     yerel_jpg = os.path.join(COVERS_DIR, dosya_adi_jpg)
     yerel_svg = os.path.join(COVERS_DIR, dosya_adi_svg)
     
+    # 1. Yerelde daha önce doğrulanmış veya kullanıcı tarafından yüklenmiş kapak
     if os.path.exists(yerel_jpg) and os.path.getsize(yerel_jpg) > 0:
         return f"/static/covers/{dosya_adi_jpg}"
     if os.path.exists(yerel_svg) and os.path.getsize(yerel_svg) > 0:
         return f"/static/covers/{dosya_adi_svg}"
 
+    # 2. Kobo Cihaz İçi Önbellek (.kobo-images)
     if image_id:
         img_id_clean = re.sub(r'[^\w]', '_', image_id).strip('_')
         img_id_path = os.path.join(COVERS_DIR, f"{img_id_clean}.jpg")
         if os.path.exists(img_id_path) and os.path.getsize(img_id_path) > 0:
             return f"/static/covers/{img_id_clean}.jpg"
 
-    # 1. iTunes Arama
+    # Temizlenmiş başlık ve yazar bilgisi
+    temiz_baslik, temiz_yazar, arama_basligi = baslik_ve_yazar_temizle(kitap_adi, yazar_adi)
+    norm_title = normalize_text(arama_basligi)
+    norm_author = normalize_text(temiz_yazar) if temiz_yazar != 'Bilinmeyen Yazar' else ''
+    
+    queries = []
+    if norm_author:
+        queries.append(f"{arama_basligi} {temiz_yazar}")
+    queries.append(arama_basligi)
+    
+    # Bilinen çeviri kitap takma adları (Alias)
+    if "marsli" in norm_title:
+        queries.append("The Martian Andy Weir")
+    if "yaris cizgisi" in norm_title:
+        queries.append("Cross the Line Simone Soltani")
+
     resim_url = None
-    try:
-        clean_title = re.sub(r'[^\w\s]', '', kitap_adi).strip()
-        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
-        url = f"https://itunes.apple.com/search?term={urllib.parse.quote(sorgu)}&entity=ebook&limit=1"
-        res = requests.get(url, timeout=1.5)
-        if res.status_code == 200:
-            results = res.json().get("results", [])
-            if results and results[0].get("artworkUrl100"):
-                resim_url = results[0]["artworkUrl100"].replace("100x100bb", "600x600bb")
-    except Exception:
-        pass
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
-    # 2. Open Library / Google Arama
+    # 3. iTunes Store Doğrulanmış Arama (Yüksek Çözünürlük 600x600)
+    for q in queries:
+        if resim_url:
+            break
+        try:
+            url = f"https://itunes.apple.com/search?term={urllib.parse.quote(q)}&entity=ebook&limit=3"
+            r = requests.get(url, headers=headers, timeout=2.5).json()
+            for item in r.get("results", []):
+                t_name = item.get("trackName", "")
+                a_name = item.get("artistName", "")
+                art = item.get("artworkUrl100")
+                norm_tn = normalize_text(t_name)
+                norm_an = normalize_text(a_name)
+                
+                # Başlık ve Yazar Doğrulama Filtresi (Yanlış kapakları engeller)
+                author_match = not norm_author or any(w in norm_an for w in norm_author.split() if len(w) > 2)
+                title_match = (norm_title in norm_tn or norm_tn in norm_title or 
+                               any(w in norm_tn for w in norm_title.split() if len(w) > 3))
+                if "marsli" in norm_title and "martian" in norm_tn:
+                    title_match = True
+                if "yaris cizgisi" in norm_title and "cross the line" in norm_tn:
+                    title_match = True
+                    
+                if title_match and author_match and art:
+                    resim_url = art.replace("100x100bb", "600x600bb")
+                    break
+        except Exception:
+            pass
+
+    # 4. OpenLibrary Doğrulanmış Arama
     if not resim_url:
-        _, inet_thumb = internet_sayfa_ara(kitap_adi, yazar_adi)
-        if inet_thumb:
-            resim_url = inet_thumb
+        for q in queries:
+            if resim_url:
+                break
+            try:
+                url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(q)}&limit=3"
+                r = requests.get(url, headers=headers, timeout=2.5).json()
+                for d in r.get("docs", []):
+                    ol_title = d.get("title", "")
+                    ol_authors = d.get("author_name", [])
+                    cover_id = d.get("cover_i")
+                    norm_ot = normalize_text(ol_title)
+                    norm_oa = normalize_text(" ".join(ol_authors) if ol_authors else '')
+                    
+                    author_match = not norm_author or any(w in norm_oa for w in norm_author.split() if len(w) > 2)
+                    title_match = (norm_title in norm_ot or norm_ot in norm_title or 
+                                   any(w in norm_ot for w in norm_title.split() if len(w) > 3))
+                    if "marsli" in norm_title and "martian" in norm_ot:
+                        title_match = True
+                    if "yaris cizgisi" in norm_title and "cross the line" in norm_ot:
+                        title_match = True
+                        
+                    if title_match and author_match and cover_id:
+                        resim_url = f"https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
+                        break
+            except Exception:
+                pass
 
+    # 5. Resmi İndir ve Kaydet
     if resim_url:
         try:
-            img_data = requests.get(resim_url, timeout=3).content
+            img_data = requests.get(resim_url, headers=headers, timeout=4).content
             if img_data and len(img_data) > 500:
                 with open(yerel_jpg, 'wb') as handler:
                     handler.write(img_data)
@@ -500,10 +605,11 @@ def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi, image_id=""):
         except Exception:
             pass
 
-    if şık_svg_kapak_uret(kitap_adi, yazar_adi, yerel_svg):
+    # 6. Bulunamazsa / Wattpad ise Şık Vektörel SVG Kapak Üret
+    if şık_svg_kapak_uret(temiz_baslik, temiz_yazar, yerel_svg):
         return f"/static/covers/{dosya_adi_svg}"
 
-    return f"https://placehold.co/400x600/2C2A29/FFFFFF?text={urllib.parse.quote(kitap_adi)}"
+    return f"/static/covers/{dosya_adi_svg}"
 
 
 def yerel_epub_dosyasi_bul(content_id, title):
@@ -528,9 +634,10 @@ def yerel_epub_dosyasi_bul(content_id, title):
 
 def kitap_meta_cozumle(kitap_ham):
     """Tek bir kitap için sayfa sayısını, kapağını ve EPUB dosyasını hazırlar."""
-    content_id, title, author, store_pages, num_pages, image_id, word_count, alinti_sayisi, not_sayisi, yer_imi_sayisi, idx = kitap_ham
-    yazar = author if author and author.strip() else "Bilinmeyen Yazar"
-    cache_key = f"{title}_{yazar}"
+    content_id, raw_title, raw_author, store_pages, num_pages, image_id, word_count, alinti_sayisi, not_sayisi, yer_imi_sayisi, idx = kitap_ham
+    temiz_title, temiz_yazar, _ = baslik_ve_yazar_temizle(raw_title, raw_author)
+    
+    cache_key = f"{raw_title}_{raw_author}"
     ayarlar = ayarlari_yukle()
     hesap_modu = ayarlar.get("sayfa_hesap_modu", "kobo_kelime")
     
@@ -544,7 +651,7 @@ def kitap_meta_cozumle(kitap_ham):
         elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
             sayfa_sayisi_sayi = max(1, round(word_count / 260))
     elif hesap_modu == "internet":
-        inet_sayfa, _ = internet_sayfa_ara(title, yazar)
+        inet_sayfa, _ = internet_sayfa_ara(raw_title, raw_author)
         if inet_sayfa:
             sayfa_sayisi_sayi = inet_sayfa
         elif store_pages and store_pages > 0:
@@ -555,7 +662,7 @@ def kitap_meta_cozumle(kitap_ham):
     if cache_key in CACHE_SOZLUGU:
         kapak_url = CACHE_SOZLUGU[cache_key]["kapak_url"]
     else:
-        kapak_url = kapak_indir_ve_yerel_yol_dondur(title, yazar, image_id)
+        kapak_url = kapak_indir_ve_yerel_yol_dondur(raw_title, raw_author, image_id)
         CACHE_SOZLUGU[cache_key] = {
             "kapak_url": kapak_url,
             "sayfa_sayisi_sayi": sayfa_sayisi_sayi
@@ -566,13 +673,14 @@ def kitap_meta_cozumle(kitap_ham):
     else:
         sayfa_metni = f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—"
         
-    epub_dosyasi = yerel_epub_dosyasi_bul(content_id, title)
+    epub_dosyasi = yerel_epub_dosyasi_bul(content_id, raw_title)
 
     return {
         "id": idx,
         "volume_id": content_id,
-        "kitap_adi": title,
-        "yazar": yazar,
+        "ham_baslik": raw_title,
+        "kitap_adi": temiz_title,
+        "yazar": temiz_yazar,
         "kategori": "Edebiyat",
         "kapak_url": kapak_url,
         "sayfa_sayisi": sayfa_metni,
@@ -859,12 +967,93 @@ def api_kitap_detay(volume_id):
             "ilerleme": ilerleme_metni
         })
         
+    temiz_baslik, temiz_yazar, _ = baslik_ve_yazar_temizle(title, author if kitap_bilgi else "")
+    kapak_url = kapak_indir_ve_yerel_yol_dondur(title, author if kitap_bilgi else "")
     epub_dosyasi = yerel_epub_dosyasi_bul(volume_id, title)
-    
+
     return jsonify({
+        "kitap_adi": temiz_baslik,
+        "yazar": temiz_yazar,
+        "ham_baslik": title,
+        "kapak_url": kapak_url,
+        "toplam_sayfa": toplam_sayfa,
         "detaylar": detay_listesi,
         "epub_indir_url": f"/api/kitap-indir/{urllib.parse.quote(epub_dosyasi)}" if epub_dosyasi else None
     })
+
+
+@app.route('/api/kapak-degistir', methods=['POST'])
+def api_kapak_degistir():
+    """Kullanıcının seçtiği bir kitap için özel kapak görseli (URL veya dosya yükleme) belirlemesini sağlar."""
+    try:
+        kitap_adi = request.form.get('kitap_adi') or ''
+        volume_id = request.form.get('volume_id') or ''
+        resim_url = request.form.get('resim_url') or ''
+        
+        # JSON formatında istek geldiyse
+        if not kitap_adi and request.is_json:
+            gelen = request.get_json() or {}
+            kitap_adi = gelen.get('kitap_adi', '')
+            volume_id = gelen.get('volume_id', '')
+            resim_url = gelen.get('resim_url', '')
+
+        if not kitap_adi and not volume_id:
+            return jsonify({"basarili": False, "mesaj": "Kitap adı veya kimliği eksik."}), 400
+
+        safe_title = re.sub(r'[^\w]', '_', kitap_adi).strip('_')
+        if not safe_title and volume_id:
+            safe_title = re.sub(r'[^\w]', '_', volume_id).strip('_')
+
+        hedef_jpg = os.path.join(COVERS_DIR, f"{safe_title}.jpg")
+        hedef_svg = os.path.join(COVERS_DIR, f"{safe_title}.svg")
+
+        # 1. Dosya Yüklemesi Varsa
+        if 'dosya' in request.files and request.files['dosya'].filename != '':
+            dosya = request.files['dosya']
+            dosya.save(hedef_jpg)
+            if os.path.exists(hedef_svg):
+                try: os.remove(hedef_svg)
+                except Exception: pass
+            
+            yeni_kapak_url = f"/static/covers/{safe_title}.jpg?t={int(datetime.now().timestamp())}"
+            for k in list(CACHE_SOZLUGU.keys()):
+                if kitap_adi in k or safe_title in k:
+                    CACHE_SOZLUGU[k]["kapak_url"] = yeni_kapak_url
+
+            return jsonify({
+                "basarili": True, 
+                "mesaj": "Kapak görseli başarıyla yüklendi ve güncellendi!",
+                "yeni_kapak_url": yeni_kapak_url
+            })
+
+        # 2. Resim URL'si Varsa
+        if resim_url:
+            resim_url = resim_url.strip()
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            resp = requests.get(resim_url, headers=headers, timeout=6)
+            if resp.status_code == 200 and len(resp.content) > 500:
+                with open(hedef_jpg, 'wb') as f:
+                    f.write(resp.content)
+                if os.path.exists(hedef_svg):
+                    try: os.remove(hedef_svg)
+                    except Exception: pass
+
+                yeni_kapak_url = f"/static/covers/{safe_title}.jpg?t={int(datetime.now().timestamp())}"
+                for k in list(CACHE_SOZLUGU.keys()):
+                    if kitap_adi in k or safe_title in k:
+                        CACHE_SOZLUGU[k]["kapak_url"] = yeni_kapak_url
+
+                return jsonify({
+                    "basarili": True, 
+                    "mesaj": "Kapak görseli URL'den başarıyla indirildi ve kaydedildi!",
+                    "yeni_kapak_url": yeni_kapak_url
+                })
+            else:
+                return jsonify({"basarili": False, "mesaj": "Girilen bağlantıdan resim indirilemedi veya geçersiz."}), 400
+
+        return jsonify({"basarili": False, "mesaj": "Lütfen bir resim bağlantısı veya dosya seçin."}), 400
+    except Exception as e:
+        return jsonify({"basarili": False, "mesaj": f"Kapak güncellenirken hata oluştu: {str(e)}"}), 500
 
 
 if __name__ == '__main__':

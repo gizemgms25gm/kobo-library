@@ -99,6 +99,47 @@
         </div>
     </div>
 
+    <!-- Kapak Değiştirme Modalı -->
+    <div id="kapak-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>🖼️ Kitap Kapağını Değiştir</h3>
+                <button class="btn-modal-close" onclick="kapakModalKapat()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="kapak-modal-kitap-adi" style="font-weight: 600; margin-bottom: 12px; color: var(--text-color);"></p>
+                
+                <div class="kapak-secenek-tabs">
+                    <button type="button" class="kapak-tab active" id="tab-btn-url" onclick="kapakTabDegistir('url')">🔗 İnternet Linki (URL)</button>
+                    <button type="button" class="kapak-tab" id="tab-btn-dosya" onclick="kapakTabDegistir('dosya')">📁 Dosya Yükle</button>
+                </div>
+
+                <!-- URL ile Değiştir -->
+                <div id="kapak-tab-url" class="form-group" style="margin-top: 15px;">
+                    <label class="form-label">Resim Bağlantısı (URL):</label>
+                    <input type="text" id="input-kapak-url" class="form-control" placeholder="https://ornek.com/kitap-kapagi.jpg" oninput="kapakOnizleUrl()">
+                    <small class="form-help">Google Görseller veya herhangi bir siteden resim adresini kopyalayıp yapıştırabilirsiniz.</small>
+                </div>
+
+                <!-- Dosya ile Değiştir -->
+                <div id="kapak-tab-dosya" class="form-group" style="margin-top: 15px; display: none;">
+                    <label class="form-label">Bilgisayardan Resim Seç (.jpg, .png, .webp):</label>
+                    <input type="file" id="input-kapak-dosya" class="form-control" accept="image/*" onchange="kapakOnizleDosya(event)">
+                </div>
+
+                <!-- Önizleme -->
+                <div class="kapak-onizleme-kutu" style="margin-top: 15px; text-align: center;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Kapak Önizleme:</span>
+                    <img id="kapak-onizleme-img" src="" alt="Önizleme" style="max-height: 180px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; margin: 0 auto;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="kapakModalKapat()">Vazgeç</button>
+                <button class="btn-primary" id="btn-kapak-kaydet" onclick="kapakKaydet()">Kapağı Kaydet</button>
+            </div>
+        </div>
+    </div>
+
     <main class="main-container">
         
         <div id="ana-kitaplik-view">
@@ -110,15 +151,27 @@
         <div id="kitap-detay-view" style="display: none;" class="detay-container">
             <div class="detay-top-bar">
                 <button id="btn-geri-don" class="btn-back">← Kitaplığa Dön</button>
-                <a id="btn-download-epub" class="btn-epub-indir" style="display: none;" target="_blank" download>
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                    <span>EPUB İndir</span>
-                </a>
+                <div style="display: flex; gap: 8px;">
+                    <button id="btn-kapak-degistir" class="btn-secondary" onclick="kapakModalAc()" title="Bu kitaba özel bir kapak görseli belirle">
+                        <span>🖼️ Kapağı Değiştir</span>
+                    </button>
+                    <a id="btn-download-epub" class="btn-epub-indir" style="display: none;" target="_blank" download>
+                        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+                        <span>EPUB İndir</span>
+                    </a>
+                </div>
             </div>
             
-            <div class="detay-header">
-                <h2 id="detay-kitap-adi">Kitap Adı</h2>
-                <p id="detay-yazar-adi">Yazar Adı</p>
+            <div class="detay-header-card">
+                <div class="detay-kapak-wrapper" onclick="kapakModalAc()" title="Kapağı değiştirmek için tıklayın">
+                    <img id="detay-kapak-img" src="" alt="Kitap Kapağı" class="detay-kapak-resmi">
+                    <div class="detay-kapak-overlay">🖼️ Değiştir</div>
+                </div>
+                <div class="detay-meta-info">
+                    <h2 id="detay-kitap-adi">Kitap Adı</h2>
+                    <p id="detay-yazar-adi">Yazar Adı</p>
+                    <div id="detay-sayfa-bilgi" class="detay-sayfa-rozet"></div>
+                </div>
             </div>
 
             <div class="filter-tabs">
