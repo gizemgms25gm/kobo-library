@@ -1,6 +1,7 @@
 {
     "bulut_yedek_aktif": true,
-    "bulut_tipi": "google_drive",
+    "bulut_tipi": "google_drive_link",
+    "gdrive_klasor_linki": "https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ123456",
     "ozel_yedek_klasoru": "",
     "github_yedek_aktif": true,
     "sadece_indirilenler": true,

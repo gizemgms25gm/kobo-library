@@ -9,14 +9,26 @@ import urllib.parse
 import re
 import hashlib
 import html
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+
+# Google Drive API Kütüphaneleri
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    GOOGLE_API_MEVCUT = True
+except ImportError:
+    GOOGLE_API_MEVCUT = False
 
 app = Flask(__name__, static_folder='static')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'KoboReaderData_Deneme.sqlite')
 CONFIG_PATH = os.path.join(BASE_DIR, 'kobo_config.json')
+GDRIVE_TOKEN_PATH = os.path.join(BASE_DIR, 'gdrive_token.json')
 
 # Kitap Dosyaları ve Kapaklar Dizinleri
 BOOKS_DIR = os.path.join(BASE_DIR, 'books')
@@ -56,7 +68,8 @@ def ayarlari_yukle():
     """Kullanıcı tercihlerini kobo_config.json dosyasından okur."""
     varsayilan_ayarlar = {
         "bulut_yedek_aktif": True,
-        "bulut_tipi": "otomatik",  # 'otomatik', 'google_drive', 'onedrive', 'ozel'
+        "bulut_tipi": "google_drive_link",  # 'google_drive_link', 'otomatik', 'onedrive', 'ozel'
+        "gdrive_klasor_linki": "",  # Web'deki Google Drive klasör linki
         "ozel_yedek_klasoru": "",
         "github_yedek_aktif": True,
         "sadece_indirilenler": True,  # Yalnızca Kobo'da yüklü gerçek kitapları göster
@@ -83,8 +96,71 @@ def ayarlari_kaydet(yeni_ayarlar):
         return False
 
 
+def gdrive_linkinden_folder_id_al(url):
+    """Google Drive web klasör linkinden (URL) doğrudan Folder ID'yi çıkarır."""
+    if not url:
+        return None
+    url = url.strip()
+    match = re.search(r'folders/([a-zA-Z0-9_-]+)', url)
+    if match:
+        return match.group(1)
+    match_id = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', url)
+    if match_id:
+        return match_id.group(1)
+    if len(url) >= 15 and '/' not in url and ' ' not in url:
+        return url
+    return None
+
+
+def gdrive_servisi_al():
+    """Google Drive API yetkilendirme servisini döner."""
+    if not GOOGLE_API_MEVCUT or not os.path.exists(GDRIVE_TOKEN_PATH):
+        return None
+    try:
+        creds = Credentials.from_authorized_user_file(GDRIVE_TOKEN_PATH)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        print("Google Drive yetki servisi hatası:", e)
+        return None
+
+
+def gdrive_web_yukle(dosya_yolu, folder_id, drive_service=None):
+    """Google Drive web klasörüne dosyayı yükler; aynı isim ve boyuttaki dosyaları atlar."""
+    if not drive_service:
+        drive_service = gdrive_servisi_al()
+    if not drive_service or not folder_id:
+        return False, "Google Drive servisi veya klasör kimliği bulunamadı"
+
+    dosya_adi = os.path.basename(dosya_yolu)
+    dosya_boyutu = os.path.getsize(dosya_yolu)
+
+    try:
+        # Klasördeki mevcut dosyaları kontrol et (Mükerrer yüklemeyi engeller)
+        q = f"'{folder_id}' in parents and name = '{dosya_adi}' and trashed = false"
+        res = drive_service.files().list(q=q, fields="files(id, name, size)").execute()
+        files = res.get('files', [])
+        
+        if files:
+            mevcut_boyut = int(files[0].get('size', 0))
+            if mevcut_boyut == dosya_boyutu:
+                return True, "Zaten mevcut (atlandı)"
+
+        # Yeni yükleme
+        media = MediaFileUpload(dosya_yolu, resumable=True)
+        file_metadata = {
+            'name': dosya_adi,
+            'parents': [folder_id]
+        }
+        drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        return True, "Yüklendi"
+    except Exception as e:
+        return False, str(e)
+
+
 def aktif_bulut_dizini_bul(ayarlar=None):
-    """Kullanıcının seçtiği veya sistemde algılanan bulut klasörünü döndürür."""
+    """Yerel bulut senkronizasyon klasörünü döndürür (OneDrive vb.)."""
     if ayarlar is None:
         ayarlar = ayarlari_yukle()
 
@@ -95,7 +171,6 @@ def aktif_bulut_dizini_bul(ayarlar=None):
     ozel_yol = ayarlar.get("ozel_yedek_klasoru", "").strip()
     kullanici_dizini = os.path.expanduser("~")
 
-    # 1. Özel Klasör Seçilmişse
     if bulut_tipi == "ozel" and ozel_yol:
         try:
             os.makedirs(ozel_yol, exist_ok=True)
@@ -103,41 +178,11 @@ def aktif_bulut_dizini_bul(ayarlar=None):
         except Exception:
             pass
 
-    # 2. Google Drive Olası Dizinleri (Genişletilmiş Tarama)
-    gdrive_yollari = [
-        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Library_Books"),
-        os.path.join(kullanici_dizini, "GoogleDrive", "Kobo_Library_Books"),
-        os.path.join(kullanici_dizini, "My Drive", "Kobo_Library_Books"),
-        os.path.join(kullanici_dizini, "Drive'ım", "Kobo_Library_Books"),
-        os.path.join("G:\\", "My Drive", "Kobo_Library_Books"),
-        os.path.join("G:\\", "Drive'ım", "Kobo_Library_Books"),
-        os.path.join("G:\\", "Kobo_Library_Books"),
-        os.path.join("D:\\", "Google Drive", "Kobo_Library_Books"),
-        os.path.join("D:\\", "My Drive", "Kobo_Library_Books")
-    ]
-    if bulut_tipi == "google_drive":
-        for y in gdrive_yollari:
-            ana_dizin = os.path.dirname(y)
-            if os.path.exists(ana_dizin):
-                try:
-                    os.makedirs(y, exist_ok=True)
-                    return y
-                except Exception:
-                    pass
-        # Eğer varsayılan Google Drive bulunamadıysa özel yola fallback yap
-        if ozel_yol:
-            try:
-                os.makedirs(ozel_yol, exist_ok=True)
-                return ozel_yol
-            except Exception:
-                pass
-
-    # 3. OneDrive Olası Dizinleri
     onedrive_yollari = [
         os.path.join(kullanici_dizini, "OneDrive", "Kobo_Library_Books"),
         os.path.join(os.environ.get("OneDrive", ""), "Kobo_Library_Books")
     ]
-    if bulut_tipi == "onedrive":
+    if bulut_tipi in ["onedrive", "otomatik"]:
         for y in onedrive_yollari:
             ana_dizin = os.path.dirname(y)
             if ana_dizin and os.path.exists(ana_dizin):
@@ -146,17 +191,6 @@ def aktif_bulut_dizini_bul(ayarlar=None):
                     return y
                 except Exception:
                     pass
-
-    # 4. Otomatik Algılama
-    tum_olasi_yollar = gdrive_yollari + onedrive_yollari
-    for y in tum_olasi_yollar:
-        ana_dizin = os.path.dirname(y)
-        if ana_dizin and os.path.exists(ana_dizin):
-            try:
-                os.makedirs(y, exist_ok=True)
-                return y
-            except Exception:
-                pass
 
     return None
 
@@ -190,7 +224,7 @@ def kobo_surucusu_bul():
 
 
 def kobo_kitap_dosyalarini_kopyala(surucu_koku):
-    """Kobo cihazındaki EPUB kitaplarını akıllıca kopyalar; aynı boyuttaki mevcut dosyaları tekrar kopyalamaz."""
+    """Kobo cihazındaki EPUB kitaplarını akıllıca yerel 'books/' ve belirlenen buluta aktarır."""
     if not surucu_koku:
         return 0, 0, []
     
@@ -199,7 +233,12 @@ def kobo_kitap_dosyalarini_kopyala(surucu_koku):
     kopyalanan_listesi = []
     
     ayarlar = ayarlari_yukle()
-    bulut_dizini = aktif_bulut_dizini_bul(ayarlar)
+    bulut_tipi = ayarlar.get("bulut_tipi", "google_drive_link")
+    gdrive_linki = ayarlar.get("gdrive_klasor_linki", "").strip()
+    folder_id = gdrive_linkinden_folder_id_al(gdrive_linki)
+    
+    drive_service = gdrive_servisi_al() if (bulut_tipi == "google_drive_link" and folder_id) else None
+    bulut_yerel_dizini = aktif_bulut_dizini_bul(ayarlar)
 
     try:
         for root, dirs, files in os.walk(surucu_koku):
@@ -219,14 +258,21 @@ def kobo_kitap_dosyalarini_kopyala(surucu_koku):
                     else:
                         zaten_var_olan += 1
 
-                    # 2. Bulut Klasörü Kontrolü: Seçilen Drive/OneDrive'a sadece yenileri kopyala
-                    if bulut_dizini:
+                    # 2. Google Drive Web Klasörüne Yükleme (Link ile)
+                    if drive_service and folder_id:
                         try:
-                            hedef_bulut = os.path.join(bulut_dizini, file)
+                            gdrive_web_yukle(kaynak, folder_id, drive_service)
+                        except Exception as e:
+                            print(f"Google Drive Web yükleme hatası ({file}):", e)
+
+                    # 3. Varsa Yerel OneDrive / Özel Klasöre Kopyalama
+                    if bulut_yerel_dizini:
+                        try:
+                            hedef_bulut = os.path.join(bulut_yerel_dizini, file)
                             if not os.path.exists(hedef_bulut) or os.path.getsize(hedef_bulut) != kaynak_boyut:
                                 shutil.copy2(kaynak, hedef_bulut)
                         except Exception as e:
-                            print(f"Buluta dosya kopyalama uyarısı ({file}):", e)
+                            print(f"Yerel bulut klasörüne kopyalama uyarısı ({file}):", e)
     except Exception as e:
         print("Kitap dosyaları taranırken uyarı:", e)
 
@@ -263,10 +309,19 @@ def kobo_cihaz_kapaklarini_kopyala(surucu_koku):
 
 def bulut_ve_git_yedekle():
     """Veritabanı güncellendiğinde GitHub ve seçilen bulut klasörüne veritabanını yedekler."""
-    rapor = {"github": False, "cloud_drive": None}
+    rapor = {"github": False, "cloud_drive": None, "gdrive_web": False}
     ayarlar = ayarlari_yukle()
     
-    # 1. Bulut Klasörüne SQLite Yedeği
+    # 1. Google Drive Web Klasörüne Veritabanı Yükleme (Link ile)
+    gdrive_linki = ayarlar.get("gdrive_klasor_linki", "").strip()
+    folder_id = gdrive_linkinden_folder_id_al(gdrive_linki)
+    if folder_id:
+        drive_service = gdrive_servisi_al()
+        if drive_service:
+            basari, _ = gdrive_web_yukle(DB_PATH, folder_id, drive_service)
+            rapor["gdrive_web"] = basari
+
+    # 2. Yerel Bulut Klasörüne SQLite Yedeği (Varsa)
     bulut_dizini = aktif_bulut_dizini_bul(ayarlar)
     if bulut_dizini:
         try:
@@ -276,7 +331,7 @@ def bulut_ve_git_yedekle():
         except Exception as e:
             print("Bulut klasörüne veritabanı kopyalama uyarısı:", e)
 
-    # 2. GitHub Otomatik Commit & Push
+    # 3. GitHub Otomatik Commit & Push
     if ayarlar.get("github_yedek_aktif", True):
         try:
             zaman_damgasi = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -472,7 +527,7 @@ def yerel_epub_dosyasi_bul(content_id, title):
 
 
 def kitap_meta_cozumle(kitap_ham):
-    """Tek bir kitap için sayfa sayısını (Kullanıcı hesaplama tercihine göre), kapağını ve EPUB dosyasını hazırlar."""
+    """Tek bir kitap için sayfa sayısını, kapağını ve EPUB dosyasını hazırlar."""
     content_id, title, author, store_pages, num_pages, image_id, word_count, alinti_sayisi, not_sayisi, yer_imi_sayisi, idx = kitap_ham
     yazar = author if author and author.strip() else "Bilinmeyen Yazar"
     cache_key = f"{title}_{yazar}"
@@ -482,7 +537,6 @@ def kitap_meta_cozumle(kitap_ham):
     sayfa_sayisi_sayi = 0
     
     if hesap_modu == "kobo_kelime":
-        # 1. Kobo Dahili & Kelime Bazlı Sayfa Hesabı (Tavsiye Edilen)
         if store_pages and isinstance(store_pages, int) and store_pages > 0:
             sayfa_sayisi_sayi = store_pages
         elif num_pages and isinstance(num_pages, int) and num_pages > 0:
@@ -490,14 +544,12 @@ def kitap_meta_cozumle(kitap_ham):
         elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
             sayfa_sayisi_sayi = max(1, round(word_count / 260))
     elif hesap_modu == "internet":
-        # 2. İnternet / Basılı Kitap Sayfa Sayısı
         inet_sayfa, _ = internet_sayfa_ara(title, yazar)
         if inet_sayfa:
             sayfa_sayisi_sayi = inet_sayfa
         elif store_pages and store_pages > 0:
             sayfa_sayisi_sayi = store_pages
     else:
-        # 3. Sadece Yüzde Modu
         sayfa_sayisi_sayi = 0
 
     if cache_key in CACHE_SOZLUGU:
@@ -543,7 +595,6 @@ def kobo_kitaplarini_getir():
     baglanti = sqlite3.connect(DB_PATH)
     imlec = baglanti.cursor()
     
-    # Yalnızca kullanıcının Kobo cihazındaki gerçek kitaplar
     filtre_sql = ""
     if sadece_indirilenler:
         filtre_sql = "AND (c.IsDownloaded = 'true' OR c.IsDownloaded = 1 OR c.IsDownloaded = '1' OR c.___FileSize > 0 OR c.ContentID LIKE 'file://%')"
@@ -605,49 +656,60 @@ def api_ayarlar():
         gelen_veri = request.get_json() or {}
         ayarlar = ayarlari_yukle()
         ayarlar["bulut_yedek_aktif"] = bool(gelen_veri.get("bulut_yedek_aktif", True))
-        ayarlar["bulut_tipi"] = gelen_veri.get("bulut_tipi", "otomatik")
+        ayarlar["bulut_tipi"] = gelen_veri.get("bulut_tipi", "google_drive_link")
+        ayarlar["gdrive_klasor_linki"] = gelen_veri.get("gdrive_klasor_linki", "").strip()
         ayarlar["ozel_yedek_klasoru"] = gelen_veri.get("ozel_yedek_klasoru", "").strip()
         ayarlar["github_yedek_aktif"] = bool(gelen_veri.get("github_yedek_aktif", True))
         ayarlar["sadece_indirilenler"] = bool(gelen_veri.get("sadece_indirilenler", True))
         ayarlar["sayfa_hesap_modu"] = gelen_veri.get("sayfa_hesap_modu", "kobo_kelime")
         
         basarili = ayarlari_kaydet(ayarlar)
-        aktif_yol = aktif_bulut_dizini_bul(ayarlar)
+        folder_id = gdrive_linkinden_folder_id_al(ayarlar["gdrive_klasor_linki"])
         return jsonify({
             "basarili": basarili,
             "ayarlar": ayarlar,
-            "aktif_bulut_dizini": aktif_yol
+            "gdrive_folder_id": folder_id,
+            "gdrive_auth_mevcut": os.path.exists(GDRIVE_TOKEN_PATH)
         })
     else:
         ayarlar = ayarlari_yukle()
-        aktif_yol = aktif_bulut_dizini_bul(ayarlar)
+        folder_id = gdrive_linkinden_folder_id_al(ayarlar.get("gdrive_klasor_linki", ""))
         return jsonify({
             "ayarlar": ayarlar,
-            "aktif_bulut_dizini": aktif_yol
+            "gdrive_folder_id": folder_id,
+            "gdrive_auth_mevcut": os.path.exists(GDRIVE_TOKEN_PATH)
         })
+
+
+@app.route('/api/gdrive-auth-durum')
+def api_gdrive_auth_durum():
+    """Google Drive oturum durumunu döner."""
+    return jsonify({
+        "oturum_acik": os.path.exists(GDRIVE_TOKEN_PATH)
+    })
 
 
 @app.route('/api/bulut-test', methods=['POST'])
 def api_bulut_test():
-    """Seçilen bulut klasörüne yazma testi yapar."""
+    """Google Drive linkini veya özel klasörü test eder."""
     gelen = request.get_json() or {}
-    yol = gelen.get("yol", "").strip()
-    if not yol:
-        ayarlar = ayarlari_yukle()
-        yol = aktif_bulut_dizini_bul(ayarlar)
-        
-    if not yol:
-        return jsonify({"basarili": False, "mesaj": "Belirtilen veya algılanan bir bulut klasörü bulunamadı."})
-        
-    try:
-        os.makedirs(yol, exist_ok=True)
-        test_dosyasi = os.path.join(yol, ".kobo_test.tmp")
-        with open(test_dosyasi, 'w', encoding='utf-8') as f:
-            f.write("Kobo Library Test")
-        os.remove(test_dosyasi)
-        return jsonify({"basarili": True, "mesaj": f"Klasör erişilebilir ve yazılabilir: {yol}", "yol": yol})
-    except Exception as e:
-        return jsonify({"basarili": False, "mesaj": f"Klasöre erişilemedi: {str(e)}"})
+    link = gelen.get("link", "").strip()
+    
+    if link:
+        folder_id = gdrive_linkinden_folder_id_al(link)
+        if folder_id:
+            return jsonify({
+                "basarili": True, 
+                "mesaj": f"Geçerli Google Drive Klasörü Algılandı (Folder ID: {folder_id})",
+                "folder_id": folder_id
+            })
+        else:
+            return jsonify({
+                "basarili": False, 
+                "mesaj": "Google Drive linki çözümlenemedi. Lütfen 'https://drive.google.com/drive/folders/...' formatında bir link yapıştırın."
+            })
+            
+    return jsonify({"basarili": False, "mesaj": "Bir link girilmedi."})
 
 
 @app.route('/api/cihaz-durumu')
@@ -692,10 +754,16 @@ def api_kobo_esitle():
         # 5. Bulut ve GitHub senkronizasyonu
         yedek_raporu = bulut_ve_git_yedekle()
         
+        ayarlar = ayarlari_yukle()
+        gdrive_linki = ayarlar.get("gdrive_klasor_linki", "")
+        
         if yeni_kitap_sayisi > 0:
-            mesaj = f"Kobo veritabanı eşitlendi! 📚 {yeni_kitap_sayisi} yeni kitap dosyası buluta aktarıldı ({atlanan_kitap_sayisi} mevcut kitap atlandı)."
+            mesaj = f"Kobo veritabanı eşitlendi! 📚 {yeni_kitap_sayisi} yeni kitap dosyası aktarıldı ({atlanan_kitap_sayisi} mevcut kitap atlandı)."
         else:
-            mesaj = f"Kobo veritabanı eşitlendi! Tüm kitap dosyalarınız ({atlanan_kitap_sayisi} kitap) zaten bulutta güncel, mükerrer kopya oluşturulmadı."
+            mesaj = f"Kobo veritabanı eşitlendi! Tüm kitap dosyalarınız ({atlanan_kitap_sayisi} kitap) güncel, mükerrer kopya oluşturulmadı."
+            
+        if gdrive_linki and gdrive_linkinden_folder_id_al(gdrive_linki):
+            mesaj += " ☁️ Google Drive web klasörünüzle senkronize edildi."
         
         return jsonify({
             "basarili": True,
@@ -704,7 +772,7 @@ def api_kobo_esitle():
             "yeni_kitap_sayisi": yeni_kitap_sayisi,
             "atlanan_kitap_sayisi": atlanan_kitap_sayisi,
             "github_yedek": yedek_raporu["github"],
-            "cloud_drive_yedek": yedek_raporu["cloud_drive"]
+            "gdrive_link": gdrive_linki if gdrive_linki else None
         })
     except Exception as e:
         return jsonify({
@@ -774,7 +842,6 @@ def api_kitap_detay(volume_id):
         else:
             tur = "yer_imi"
         
-        # Konum formatlama: "%58 - Sayfa 677" veya "%58"
         ilerleme_metni = ""
         if progress is not None and isinstance(progress, (int, float)):
             yuzde = int(round(progress * 100))
