@@ -246,7 +246,7 @@ function koboEsitle() {
         btnSync.disabled = true;
     }
 
-    toastGoster("Kobo taranıyor; veritabanı, kapaklar ve EPUB kitapları aktarılıyor...", "info");
+    toastGoster("Kobo taranıyor; veritabanı, kapaklar ve yeni EPUB kitapları aktarılıyor...", "info");
 
     fetch(`/api/kobo-esitle?t=${Date.now()}`, { method: 'POST' })
         .then(res => res.json())
@@ -254,7 +254,7 @@ function koboEsitle() {
             if (data.basarili) {
                 let mesaj = data.mesaj;
                 if (data.github_yedek) {
-                    mesaj += " 🚀 GitHub'a da yedeklendi.";
+                    mesaj += " 🚀 (GitHub'a da push edildi)";
                 }
                 toastGoster(mesaj, "success");
                 kitaplariYukle();
@@ -272,6 +272,79 @@ function koboEsitle() {
                 btnSync.disabled = false;
             }
         });
+}
+
+// --- Ayarlar Modalı Yönetimi ---
+function ayarlariAc() {
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+
+    fetch(`/api/ayarlar?t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => {
+            const ayarlar = data.ayarlar || {};
+            document.getElementById('setting-cloud-enabled').checked = ayarlar.bulut_yedek_aktif !== false;
+            document.getElementById('setting-cloud-type').value = ayarlar.bulut_tipi || 'otomatik';
+            document.getElementById('setting-custom-path').value = ayarlar.ozel_yedek_klasoru || '';
+            document.getElementById('setting-github-enabled').checked = ayarlar.github_yedek_aktif !== false;
+
+            const pathText = document.getElementById('detected-path-text');
+            if (data.aktif_bulut_dizini) {
+                pathText.innerText = data.aktif_bulut_dizini;
+                pathText.style.color = '#34c759';
+            } else {
+                pathText.innerText = 'Bulut klasörü henüz bulunamadı';
+                pathText.style.color = '#ff9500';
+            }
+
+            bulutTipiDegisti();
+            modal.style.display = 'flex';
+        })
+        .catch(err => {
+            console.error("Ayarlar yüklenemedi:", err);
+            modal.style.display = 'flex';
+        });
+}
+
+function ayarlariKapat() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function bulutTipiDegisti() {
+    const tip = document.getElementById('setting-cloud-type').value;
+    const customGroup = document.getElementById('custom-path-group');
+    if (customGroup) {
+        customGroup.style.display = (tip === 'ozel') ? 'block' : 'none';
+    }
+}
+
+function ayarlariKaydet() {
+    const payload = {
+        bulut_yedek_aktif: document.getElementById('setting-cloud-enabled').checked,
+        bulut_tipi: document.getElementById('setting-cloud-type').value,
+        ozel_yedek_klasoru: document.getElementById('setting-custom-path').value.trim(),
+        github_yedek_aktif: document.getElementById('setting-github-enabled').checked
+    };
+
+    fetch('/api/ayarlar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.basarili) {
+            toastGoster("⚙️ Ayarlar başarıyla kaydedildi!", "success");
+            ayarlariKapat();
+        } else {
+            toastGoster("Ayarlar kaydedilirken hata oluştu.", "error");
+        }
+    })
+    .catch(err => {
+        console.error("Ayar kaydetme hatası:", err);
+        toastGoster("Ayarlar kaydedilirken hata oluştu.", "error");
+    });
 }
 
 function toastGoster(mesaj, tip = 'info') {

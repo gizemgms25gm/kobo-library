@@ -1,6 +1,7 @@
-from flask import Flask, render_template, jsonify, send_from_directory
+from flask import Flask, render_template, jsonify, send_from_directory, request
 import sqlite3
 import os
+import json
 import shutil
 import subprocess
 import requests
@@ -15,6 +16,7 @@ app = Flask(__name__, static_folder='static')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'KoboReaderData_Deneme.sqlite')
+CONFIG_PATH = os.path.join(BASE_DIR, 'kobo_config.json')
 
 # Kitap Dosyaları ve Kapaklar Dizinleri
 BOOKS_DIR = os.path.join(BASE_DIR, 'books')
@@ -49,6 +51,97 @@ KAPAK_GRADYANLARI = [
 ]
 
 
+# --- AYARLAR YÖNETİCİSİ ---
+def ayarlari_yukle():
+    """Kullanıcı tercihlerini kobo_config.json dosyasından okur."""
+    varsayilan_ayarlar = {
+        "bulut_yedek_aktif": True,
+        "bulut_tipi": "otomatik",  # 'otomatik', 'google_drive', 'onedrive', 'ozel'
+        "ozel_yedek_klasoru": "",
+        "github_yedek_aktif": True
+    }
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                kayitli = json.load(f)
+                varsayilan_ayarlar.update(kayitli)
+        except Exception as e:
+            print("Ayar dosyası okuma hatası:", e)
+    return varsayilan_ayarlar
+
+
+def ayarlari_kaydet(yeni_ayarlar):
+    """Kullanıcı tercihlerini kobo_config.json dosyasına yazar."""
+    try:
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(yeni_ayarlar, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print("Ayar kaydetme hatası:", e)
+        return False
+
+
+def aktif_bulut_dizini_bul(ayarlar=None):
+    """Kullanıcının seçtiği veya sistemde algılanan bulut klasörünü döndürür."""
+    if ayarlar is None:
+        ayarlar = ayarlari_yukle()
+
+    if not ayarlar.get("bulut_yedek_aktif", True):
+        return None
+
+    bulut_tipi = ayarlar.get("bulut_tipi", "otomatik")
+    ozel_yol = ayarlar.get("ozel_yedek_klasoru", "").strip()
+    kullanici_dizini = os.path.expanduser("~")
+
+    # 1. Özel Klasör Seçilmişse
+    if bulut_tipi == "ozel" and ozel_yol:
+        if os.path.exists(ozel_yol):
+            return ozel_yol
+        try:
+            os.makedirs(ozel_yol, exist_ok=True)
+            return ozel_yol
+        except Exception:
+            pass
+
+    # 2. Google Drive Seçilmişse
+    gdrive_yollari = [
+        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Library_Books"),
+        os.path.join("G:\\", "My Drive", "Kobo_Library_Books"),
+        os.path.join("G:\\", "Drive'ım", "Kobo_Library_Books")
+    ]
+    if bulut_tipi == "google_drive":
+        for y in gdrive_yollari:
+            ana_dizin = os.path.dirname(y)
+            if os.path.exists(ana_dizin):
+                os.makedirs(y, exist_ok=True)
+                return y
+
+    # 3. OneDrive Seçilmişse
+    onedrive_yollari = [
+        os.path.join(kullanici_dizini, "OneDrive", "Kobo_Library_Books"),
+        os.path.join(os.environ.get("OneDrive", ""), "Kobo_Library_Books")
+    ]
+    if bulut_tipi == "onedrive":
+        for y in onedrive_yollari:
+            ana_dizin = os.path.dirname(y)
+            if ana_dizin and os.path.exists(ana_dizin):
+                os.makedirs(y, exist_ok=True)
+                return y
+
+    # 4. Otomatik Algılama
+    tum_olasi_yollar = gdrive_yollari + onedrive_yollari
+    for y in tum_olasi_yollar:
+        ana_dizin = os.path.dirname(y)
+        if ana_dizin and os.path.exists(ana_dizin):
+            try:
+                os.makedirs(y, exist_ok=True)
+                return y
+            except Exception:
+                pass
+
+    return None
+
+
 # --- TARİH FORMATLAYICI (GG.AA.YYYY - SS:DK) ---
 def tarih_formatla(tarih_metni):
     if not tarih_metni:
@@ -78,35 +171,19 @@ def kobo_surucusu_bul():
 
 
 def kobo_kitap_dosyalarini_kopyala(surucu_koku):
-    """Kobo cihazındaki tüm .epub, .kepub.epub ve kitap dosyalarını yerel 'books/' klasörüne ve buluta kopyalar."""
+    """Kobo cihazındaki EPUB kitaplarını akıllıca kopyalar; aynı boyuttaki mevcut dosyaları tekrar kopyalamaz."""
     if not surucu_koku:
-        return 0, []
+        return 0, 0, []
     
-    kopyalanan = 0
+    yeni_eklenen = 0
+    zaten_var_olan = 0
     kopyalanan_listesi = []
     
-    # Bulut klasörleri tespiti
-    kullanici_dizini = os.path.expanduser("~")
-    bulut_kitap_dizinleri = [
-        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Library_Books"),
-        os.path.join(kullanici_dizini, "OneDrive", "Kobo_Library_Books"),
-        os.path.join("G:\\", "My Drive", "Kobo_Library_Books")
-    ]
-    aktif_bulut_dizini = None
-    for b_dizin in bulut_kitap_dizinleri:
-        try:
-            ana_dizin = os.path.dirname(b_dizin)
-            if os.path.exists(ana_dizin):
-                if not os.path.exists(b_dizin):
-                    os.makedirs(b_dizin)
-                aktif_bulut_dizini = b_dizin
-                break
-        except Exception:
-            pass
+    ayarlar = ayarlari_yukle()
+    bulut_dizini = aktif_bulut_dizini_bul(ayarlar)
 
     try:
         for root, dirs, files in os.walk(surucu_koku):
-            # Sistem klasörlerini (.kobo) atla
             dirs[:] = [d for d in dirs if not d.startswith('.kobo')]
             for file in files:
                 ext = file.lower()
@@ -114,24 +191,30 @@ def kobo_kitap_dosyalarini_kopyala(surucu_koku):
                     kaynak = os.path.join(root, file)
                     hedef_yerel = os.path.join(BOOKS_DIR, file)
                     
-                    # Yerel 'books/' klasörüne kopyala
-                    if not os.path.exists(hedef_yerel) or os.path.getsize(hedef_yerel) != os.path.getsize(kaynak):
-                        shutil.copy2(kaynak, hedef_yerel)
-                        kopyalanan += 1
-                        kopyalanan_listesi.append(file)
+                    kaynak_boyut = os.path.getsize(kaynak)
                     
-                    # Bulut Drive klasörüne kopyala (Google Drive / OneDrive)
-                    if aktif_bulut_dizini:
+                    # 1. Yerel Kontrol: Dosya yoksa veya boyutu değişmişse kopyala
+                    dosya_guncellendi = False
+                    if not os.path.exists(hedef_yerel) or os.path.getsize(hedef_yerel) != kaynak_boyut:
+                        shutil.copy2(kaynak, hedef_yerel)
+                        yeni_eklenen += 1
+                        dosya_guncellendi = True
+                        kopyalanan_listesi.append(file)
+                    else:
+                        zaten_var_olan += 1
+
+                    # 2. Bulut Klasörü Kontrolü: Seçilen Drive/OneDrive'a sadece yenileri kopyala
+                    if bulut_dizini:
                         try:
-                            hedef_bulut = os.path.join(aktif_bulut_dizini, file)
-                            if not os.path.exists(hedef_bulut) or os.path.getsize(hedef_bulut) != os.path.getsize(kaynak):
+                            hedef_bulut = os.path.join(bulut_dizini, file)
+                            if not os.path.exists(hedef_bulut) or os.path.getsize(hedef_bulut) != kaynak_boyut:
                                 shutil.copy2(kaynak, hedef_bulut)
                         except Exception as e:
                             print(f"Buluta dosya kopyalama uyarısı ({file}):", e)
     except Exception as e:
         print("Kitap dosyaları taranırken uyarı:", e)
 
-    return kopyalanan, kopyalanan_listesi
+    return yeni_eklenen, zaten_var_olan, kopyalanan_listesi
 
 
 def kobo_cihaz_kapaklarini_kopyala(surucu_koku):
@@ -163,38 +246,31 @@ def kobo_cihaz_kapaklarini_kopyala(surucu_koku):
 
 
 def bulut_ve_git_yedekle():
-    """Veritabanı güncellendiğinde GitHub ve varsa Google Drive / OneDrive'a yedekler."""
+    """Veritabanı güncellendiğinde GitHub ve seçilen bulut klasörüne veritabanını yedekler."""
     rapor = {"github": False, "cloud_drive": None}
+    ayarlar = ayarlari_yukle()
     
-    kullanici_dizini = os.path.expanduser("~")
-    olasi_bulut_dizinleri = [
-        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Backup"),
-        os.path.join(kullanici_dizini, "OneDrive", "Kobo_Backup"),
-        os.path.join("G:\\", "My Drive", "Kobo_Backup")
-    ]
-    
-    for hedef_dizin in olasi_bulut_dizinleri:
+    # 1. Kullanıcının Tercih Ettiği Bulut Klasörüne SQLite Yedeği
+    bulut_dizini = aktif_bulut_dizini_bul(ayarlar)
+    if bulut_dizini:
         try:
-            ana_dizin = os.path.dirname(hedef_dizin)
-            if os.path.exists(ana_dizin):
-                if not os.path.exists(hedef_dizin):
-                    os.makedirs(hedef_dizin)
-                yedek_hedef = os.path.join(hedef_dizin, "KoboReader.sqlite")
-                shutil.copy2(DB_PATH, yedek_hedef)
-                rapor["cloud_drive"] = yedek_hedef
-                break
+            yedek_db = os.path.join(bulut_dizini, "KoboReader.sqlite")
+            shutil.copy2(DB_PATH, yedek_db)
+            rapor["cloud_drive"] = yedek_db
         except Exception as e:
-            print("Bulut klasörü kopyalama uyarısı:", e)
+            print("Bulut klasörüne veritabanı kopyalama uyarısı:", e)
 
-    try:
-        zaman_damgasi = datetime.now().strftime("%d.%m.%Y %H:%M")
-        subprocess.run(["git", "add", "."], cwd=BASE_DIR, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", f"Kobo otomatik eşitleme: {zaman_damgasi}"], cwd=BASE_DIR, check=False, capture_output=True)
-        push_sonuc = subprocess.run(["git", "push", "origin", "main"], cwd=BASE_DIR, check=False, capture_output=True)
-        if push_sonuc.returncode == 0:
-            rapor["github"] = True
-    except Exception as e:
-        print("GitHub push hatası:", e)
+    # 2. GitHub Otomatik Commit & Push
+    if ayarlar.get("github_yedek_aktif", True):
+        try:
+            zaman_damgasi = datetime.now().strftime("%d.%m.%Y %H:%M")
+            subprocess.run(["git", "add", "."], cwd=BASE_DIR, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", f"Kobo otomatik eşitleme: {zaman_damgasi}"], cwd=BASE_DIR, check=False, capture_output=True)
+            push_sonuc = subprocess.run(["git", "push", "origin", "main"], cwd=BASE_DIR, check=False, capture_output=True)
+            if push_sonuc.returncode == 0:
+                rapor["github"] = True
+        except Exception as e:
+            print("GitHub push hatası:", e)
 
     return rapor
 
@@ -368,14 +444,12 @@ def yerel_epub_dosyasi_bul(content_id, title):
     if not os.path.exists(BOOKS_DIR):
         return None
         
-    # ContentID'deki dosya adı (Örn: file:///mnt/onboard/...)
     if content_id and 'file://' in content_id:
         ham_isim = os.path.basename(urllib.parse.unquote(content_id.replace('file://', '').replace('/mnt/onboard/', '')))
         yerel_yol = os.path.join(BOOKS_DIR, ham_isim)
         if os.path.exists(yerel_yol):
             return ham_isim
 
-    # Başlık üzerinden arama
     clean_title = re.sub(r'[^\w]', '', title).lower()
     for dosya in os.listdir(BOOKS_DIR):
         clean_file = re.sub(r'[^\w]', '', dosya).lower()
@@ -391,7 +465,7 @@ def kitap_meta_cozumle(kitap_ham):
     yazar = author if author and author.strip() else "Bilinmeyen Yazar"
     cache_key = f"{title}_{yazar}"
     
-    # 1. Sayfa Sayısı Hesaplama Mantığı
+    # Sayfa Sayısı Hesaplama Mantığı
     sayfa_sayisi_sayi = 0
     if store_pages and isinstance(store_pages, int) and store_pages > 0:
         sayfa_sayisi_sayi = store_pages
@@ -495,6 +569,32 @@ def api_kitaplar():
     return jsonify(kobo_kitaplarini_getir())
 
 
+@app.route('/api/ayarlar', methods=['GET', 'POST'])
+def api_ayarlar():
+    if request.method == 'POST':
+        gelen_veri = request.get_json() or {}
+        ayarlar = ayarlari_yukle()
+        ayarlar["bulut_yedek_aktif"] = bool(gelen_veri.get("bulut_yedek_aktif", True))
+        ayarlar["bulut_tipi"] = gelen_veri.get("bulut_tipi", "otomatik")
+        ayarlar["ozel_yedek_klasoru"] = gelen_veri.get("ozel_yedek_klasoru", "").strip()
+        ayarlar["github_yedek_aktif"] = bool(gelen_veri.get("github_yedek_aktif", True))
+        
+        basarili = ayarlari_kaydet(ayarlar)
+        aktif_yol = aktif_bulut_dizini_bul(ayarlar)
+        return jsonify({
+            "basarili": basarili,
+            "ayarlar": ayarlar,
+            "aktif_bulut_dizini": aktif_yol
+        })
+    else:
+        ayarlar = ayarlari_yukle()
+        aktif_yol = aktif_bulut_dizini_bul(ayarlar)
+        return jsonify({
+            "ayarlar": ayarlar,
+            "aktif_bulut_dizini": aktif_yol
+        })
+
+
 @app.route('/api/cihaz-durumu')
 def api_cihaz_durumu():
     surucu, kobo_yolu = kobo_surucusu_bul()
@@ -528,8 +628,8 @@ def api_kobo_esitle():
         # 2. Cihazın içindeki kapakları (Wattpad/özel kitaplar dahil) kopyalama
         kopyalanan_kapak = kobo_cihaz_kapaklarini_kopyala(surucu)
         
-        # 3. Cihazdaki tüm EPUB dosyalarını 'books/' klasörüne ve Bulut Klasörüne aktarma
-        kopyalanan_kitap_sayisi, kitap_listesi = kobo_kitap_dosyalarini_kopyala(surucu)
+        # 3. Cihazdaki EPUB dosyalarını 'books/' klasörüne ve Bulut Klasörüne aktarma (Yalnızca yeni/değişen dosyalar!)
+        yeni_kitap_sayisi, atlanan_kitap_sayisi, kitap_listesi = kobo_kitap_dosyalarini_kopyala(surucu)
         
         # 4. Önbelleği temizleme
         CACHE_SOZLUGU.clear()
@@ -537,13 +637,17 @@ def api_kobo_esitle():
         # 5. Bulut ve GitHub senkronizasyonu
         yedek_raporu = bulut_ve_git_yedekle()
         
-        mesaj = f"Kobo veritabanı eşitlendi! 📚 {kopyalanan_kitap_sayisi} kitap dosyası (EPUB) ve {kopyalanan_kapak} kapak yedeklendi."
+        if yeni_kitap_sayisi > 0:
+            mesaj = f"Kobo veritabanı eşitlendi! 📚 {yeni_kitap_sayisi} yeni kitap dosyası (EPUB) buluta aktarıldı ({atlanan_kitap_sayisi} mevcut kitap atlandı)."
+        else:
+            mesaj = f"Kobo veritabanı eşitlendi! Tüm kitap dosyalarınız ({atlanan_kitap_sayisi} kitap) zaten bulutta güncel, mükerrer kopyalama yapılmadı."
         
         return jsonify({
             "basarili": True,
             "mesaj": mesaj,
             "kaynak": kobo_yolu,
-            "kopyalanan_kitap_sayisi": kopyalanan_kitap_sayisi,
+            "yeni_kitap_sayisi": yeni_kitap_sayisi,
+            "atlanan_kitap_sayisi": atlanan_kitap_sayisi,
             "github_yedek": yedek_raporu["github"],
             "cloud_drive_yedek": yedek_raporu["cloud_drive"]
         })
@@ -562,7 +666,6 @@ def api_kitap_detay(volume_id):
     baglanti = sqlite3.connect(DB_PATH)
     imlec = baglanti.cursor()
     
-    # Kitabın toplam sayfa sayısını bul
     imlec.execute("""
         SELECT Title, Attribution, ___NumPages, StorePages,
                (SELECT SUM(w.WordCount) FROM content w WHERE w.BookID = c.ContentID AND w.WordCount > 0) as total_words
@@ -591,7 +694,6 @@ def api_kitap_detay(volume_id):
                 if inet_sayfa:
                     toplam_sayfa = inet_sayfa
 
-    # Alıntıları ve notları kronolojik çek
     sorgu = """
     SELECT Type, Text, Annotation, DateCreated, ChapterProgress
     FROM Bookmark
@@ -615,7 +717,6 @@ def api_kitap_detay(volume_id):
         else:
             tur = "yer_imi"
         
-        # Konum formatlama: "%58 - Sayfa 677" veya "%58"
         ilerleme_metni = ""
         if progress is not None and isinstance(progress, (int, float)):
             yuzde = int(round(progress * 100))
