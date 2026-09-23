@@ -6,6 +6,9 @@
     --text-muted: #777777;
     --accent-color: #007aff;
     --note-color: #ff9500;
+    --bookmark-color: #af52de;
+    --success-color: #34c759;
+    --danger-color: #ff3b30;
 }
 
 body.dark-mode {
@@ -31,6 +34,8 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 20px 40px;
+    flex-wrap: wrap;
+    gap: 15px;
 }
 
 .logo {
@@ -50,11 +55,51 @@ body {
 .header-right {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 14px;
 }
 
+/* Cihaz Eşitle Butonu */
+.btn-sync {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    transition: all 0.2s ease;
+}
+
+.btn-sync:hover {
+    background: rgba(0, 122, 255, 0.08);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    transform: translateY(-1px);
+}
+
+.sync-icon {
+    width: 15px;
+    height: 15px;
+    transition: transform 0.3s ease;
+}
+
+.btn-sync.loading .sync-icon {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Arama Kutusu */
 .search-box input {
-    width: 220px;
+    width: 200px;
     padding: 8px 18px;
     border-radius: 25px;
     border: 1px solid rgba(0, 0, 0, 0.08);
@@ -106,21 +151,57 @@ input:checked + .slider:before { transform: translateX(20px); }
 .slider.round { border-radius: 34px; }
 .slider.round:before { border-radius: 50%; }
 
-/* Grid Düzeni - Sabit kibar genişlik */
+/* Bildirim Toast */
+.toast-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    background: #1e1e1e;
+    color: #ffffff;
+    padding: 12px 24px;
+    border-radius: 30px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    z-index: 9999;
+    opacity: 0;
+    transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    pointer-events: none;
+}
+
+.toast-notification.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast-notification.success {
+    background: #2e7d32;
+}
+
+.toast-notification.error {
+    background: #c62828;
+}
+
+.toast-notification.info {
+    background: #0288d1;
+}
+
+/* Grid Düzeni */
 .main-container {
     max-width: 1100px;
     margin: 10px auto;
-    padding: 0 20px;
+    padding: 0 20px 40px;
 }
 
 .grid-container {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 165px); /* Kart genişliği 165px ile sınırlandırıldı */
+    grid-template-columns: repeat(auto-fill, 165px);
     gap: 20px;
     justify-content: flex-start;
 }
 
-/* Kitap Kartı Tasarımı - Kompakt Roman Boyutu */
+/* Kitap Kartı Tasarımı */
 .kitap-karti {
     width: 165px;
     background-color: var(--card-bg);
@@ -139,7 +220,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 
 .kapak-container {
     width: 100%;
-    height: 240px; /* Sabit kapak yüksekliği */
+    height: 240px;
     overflow: hidden;
     background-color: rgba(0,0,0,0.03);
 }
@@ -151,7 +232,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     display: block;
 }
 
-/* Kart Altındaki Bilgi Kutusu */
 .kitap-bilgi {
     padding: 10px 12px;
 }
@@ -181,18 +261,18 @@ input:checked + .slider:before { transform: translateX(20px); }
     margin-bottom: 6px;
 }
 
-/* Alt İkon Satırı: " 67   📝 7 */
+/* Alt İkon Satırı: 💬 67 | 📝 7 | 🔖 3 */
 .stats-row {
     display: flex;
-    gap: 12px;
+    gap: 10px;
     align-items: center;
 }
 
 .stat-item {
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 0.8rem;
+    gap: 3px;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-color);
 }
@@ -217,8 +297,54 @@ input:checked + .slider:before { transform: translateX(20px); }
     border-radius: 10px;
     cursor: pointer;
     margin-bottom: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.2s;
 }
 
+.btn-back:hover {
+    background: rgba(0,0,0,0.05);
+}
+
+/* Filtre Sekmeleri */
+.filter-tabs {
+    display: flex;
+    gap: 8px;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
+.filter-tab {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.filter-tab:hover {
+    color: var(--text-color);
+    border-color: var(--text-muted);
+}
+
+.filter-tab.active {
+    background: var(--text-color);
+    color: var(--bg-color);
+    border-color: var(--text-color);
+}
+
+.detay-ayrac {
+    border: 0;
+    height: 1px;
+    background: var(--border-color);
+    margin: 20px 0;
+}
+
+/* Kart Çeşitleri */
 .alinti-karti {
     background: var(--card-bg);
     border-left: 4px solid var(--accent-color);
@@ -233,6 +359,27 @@ input:checked + .slider:before { transform: translateX(20px); }
 
 .alinti-karti.not-karti {
     border-left-color: var(--note-color);
+}
+
+.alinti-karti.yer-imi-karti {
+    border-left-color: var(--bookmark-color);
+}
+
+.yer-imi-rozet {
+    display: inline-block;
+    background: rgba(175, 82, 222, 0.12);
+    color: var(--bookmark-color);
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.yer-imi-aciklama {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    margin: 4px 0 0 0;
 }
 
 .alinti-metni {
@@ -256,4 +403,11 @@ input:checked + .slider:before { transform: translateX(20px); }
     font-size: 0.72rem;
     color: var(--text-muted);
     margin-top: 10px;
+}
+
+.bos-mesaj, .yukleniyor, .hata-mesaj {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 0;
+    font-size: 0.95rem;
 }

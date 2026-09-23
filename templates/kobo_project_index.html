@@ -14,16 +14,23 @@
         </div>
 
         <div class="header-right">
+            <button id="btn-sync" class="btn-sync" onclick="koboEsitle()" title="Kobo cihazından veritabanını çek ve yedekle">
+                <svg class="sync-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                <span>Cihazı Eşitle</span>
+            </button>
+
             <div class="search-box">
                 <input type="text" id="search-input" placeholder="Kitap veya yazar ara..." onkeyup="kitapFiltrele()">
             </div>
 
-            <label class="ios-switch">
+            <label class="ios-switch" title="Temayı Değiştir">
                 <input type="checkbox" id="theme-toggle">
                 <span class="slider round"></span>
             </label>
         </div>
     </header>
+
+    <div id="toast-notification" class="toast-notification"></div>
 
     <main class="main-container">
         
@@ -41,10 +48,17 @@
                 <p id="detay-yazar-adi">Yazar Adı</p>
             </div>
 
+            <div class="filter-tabs">
+                <button class="filter-tab active" data-filter="all" onclick="filtreDegistir('all', this)">Tümü (<span id="count-all">0</span>)</button>
+                <button class="filter-tab" data-filter="alinti" onclick="filtreDegistir('alinti', this)">💬 Alıntılar (<span id="count-alinti">0</span>)</button>
+                <button class="filter-tab" data-filter="not" onclick="filtreDegistir('not', this)">📝 Notlar (<span id="count-not">0</span>)</button>
+                <button class="filter-tab" data-filter="yer_imi" onclick="filtreDegistir('yer_imi', this)">🔖 Yer İmleri (<span id="count-yer_imi">0</span>)</button>
+            </div>
+
             <hr class="detay-ayrac">
 
             <div id="alinti-not-listesi" class="alinti-listesi">
-                <!-- Alıntı içerikleri buraya yüklenecek -->
+                <!-- Alıntı, Not ve Yer İmi içerikleri buraya yüklenecek -->
             </div>
         </div>
 

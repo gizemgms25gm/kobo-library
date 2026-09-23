@@ -1,6 +1,8 @@
 from flask import Flask, render_template, jsonify
 import sqlite3
 import os
+import shutil
+import subprocess
 import requests
 import urllib.parse
 import re
@@ -10,6 +12,11 @@ app = Flask(__name__, static_folder='static')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'KoboReaderData_Deneme.sqlite')
+
+# Git ve Komut Satırı Yolları
+LOCAL_GIT_CMD = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Git', 'cmd')
+if os.path.exists(LOCAL_GIT_CMD) and LOCAL_GIT_CMD not in os.environ.get('PATH', ''):
+    os.environ['PATH'] += os.pathsep + LOCAL_GIT_CMD
 
 COVERS_DIR = os.path.join(BASE_DIR, 'static', 'covers')
 if not os.path.exists(COVERS_DIR):
@@ -23,12 +30,66 @@ def tarih_formatla(tarih_metni):
     if not tarih_metni:
         return ""
     try:
-        # Kobo veritabanındaki iso formatı parse etme
         tarih_metni = tarih_metni.replace('Z', '').split('.')[0]
         dt = datetime.fromisoformat(tarih_metni)
         return dt.strftime("%d.%m.%Y - %H:%M")
     except Exception:
         return tarih_metni
+
+
+def kobo_surucusu_bul():
+    """Bağlı USB sürücülerinde Kobo veritabanını (.kobo/KoboReader.sqlite) arar."""
+    suruculer = [f"{chr(h)}:\\" for h in range(ord('D'), ord('Z') + 1)]
+    for surucu in suruculer:
+        if os.path.exists(surucu):
+            olasi_yollar = [
+                os.path.join(surucu, '.kobo', 'KoboReader.sqlite'),
+                os.path.join(surucu, 'KoboReader.sqlite'),
+                os.path.join(surucu, '.kobo', 'KoboReaderData.sqlite')
+            ]
+            for yol in olasi_yollar:
+                if os.path.exists(yol):
+                    return yol
+    return None
+
+
+def bulut_ve_git_yedekle():
+    """Veritabanı güncellendiğinde GitHub ve varsa Google Drive / OneDrive'a yedekler."""
+    rapor = {"github": False, "cloud_drive": None}
+    
+    # 1. Google Drive / OneDrive Yedeği (Varsa)
+    kullanici_dizini = os.path.expanduser("~")
+    olasi_bulut_dizinleri = [
+        os.path.join(kullanici_dizini, "Google Drive", "Kobo_Backup"),
+        os.path.join(kullanici_dizini, "OneDrive", "Kobo_Backup"),
+        os.path.join("G:\\", "My Drive", "Kobo_Backup")
+    ]
+    
+    for hedef_dizin in olasi_bulut_dizinleri:
+        try:
+            ana_dizin = os.path.dirname(hedef_dizin)
+            if os.path.exists(ana_dizin):
+                if not os.path.exists(hedef_dizin):
+                    os.makedirs(hedef_dizin)
+                yedek_hedef = os.path.join(hedef_dizin, "KoboReader.sqlite")
+                shutil.copy2(DB_PATH, yedek_hedef)
+                rapor["cloud_drive"] = yedek_hedef
+                break
+        except Exception as e:
+            print("Bulut klasörü kopyalama uyarısı:", e)
+
+    # 2. GitHub Otomatik Commit & Push
+    try:
+        zaman_damgasi = datetime.now().strftime("%d.%m.%Y %H:%M")
+        subprocess.run(["git", "add", "."], cwd=BASE_DIR, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"Kobo otomatik eşitleme: {zaman_damgasi}"], cwd=BASE_DIR, check=False, capture_output=True)
+        push_sonuc = subprocess.run(["git", "push", "origin", "main"], cwd=BASE_DIR, check=False, capture_output=True)
+        if push_sonuc.returncode == 0:
+            rapor["github"] = True
+    except Exception as e:
+        print("GitHub push hatası:", e)
+
+    return rapor
 
 
 def canlı_google_sayfa_ara(kitap_adi, yazar_adi):
@@ -140,7 +201,8 @@ def kobo_kitaplarini_getir():
         imlec.execute("""
             SELECT 
                 COUNT(CASE WHEN LOWER(Type) = 'highlight' OR (Text IS NOT NULL AND Text != '' AND (Annotation IS NULL OR Annotation = '')) THEN 1 END) as alinti_sayisi,
-                COUNT(CASE WHEN LOWER(Type) = 'note' OR (Annotation IS NOT NULL AND Annotation != '') THEN 1 END) as not_sayisi
+                COUNT(CASE WHEN LOWER(Type) = 'note' OR (Annotation IS NOT NULL AND Annotation != '') THEN 1 END) as not_sayisi,
+                COUNT(CASE WHEN LOWER(Type) = 'bookmark' OR LOWER(Type) = 'dogear' OR ((Text IS NULL OR Text = '') AND (Annotation IS NULL OR Annotation = '')) THEN 1 END) as yer_imi_sayisi
             FROM Bookmark 
             WHERE VolumeID = ? OR VolumeID LIKE ?
         """, (content_id, f"%{title}%"))
@@ -148,6 +210,7 @@ def kobo_kitaplarini_getir():
         stats = imlec.fetchone()
         alinti_sayisi = stats[0] if stats else 0
         not_sayisi = stats[1] if stats else 0
+        yer_imi_sayisi = stats[2] if stats else 0
 
         if cache_key in CACHE_SOZLUGU:
             kapak_url = CACHE_SOZLUGU[cache_key]["kapak_url"]
@@ -177,7 +240,8 @@ def kobo_kitaplarini_getir():
             "kapak_url": kapak_url,
             "sayfa_sayisi": sayfa_sayisi,
             "alinti_sayisi": alinti_sayisi,
-            "not_sayisi": not_sayisi
+            "not_sayisi": not_sayisi,
+            "yer_imi_sayisi": yer_imi_sayisi
         })
         id_counter += 1
         
@@ -193,6 +257,46 @@ def ana_sayfa():
 @app.route('/api/kitaplar')
 def api_kitaplar():
     return jsonify(kobo_kitaplarini_getir())
+
+
+@app.route('/api/cihaz-durumu')
+def api_cihaz_durumu():
+    kobo_yolu = kobo_surucusu_bul()
+    return jsonify({
+        "bagli": kobo_yolu is not None,
+        "surucu_yolu": kobo_yolu if kobo_yolu else ""
+    })
+
+
+@app.route('/api/kobo-esitle', methods=['POST', 'GET'])
+def api_kobo_esitle():
+    kobo_yolu = kobo_surucusu_bul()
+    if not kobo_yolu:
+        return jsonify({
+            "basarili": False, 
+            "mesaj": "Kobo cihazı bulunamadı. Lütfen cihazın USB ile bilgisayara bağlı olduğundan ve 'Bağlan' onayını verdiğinizden emin olun."
+        }), 404
+
+    try:
+        # Cihazdan projeye kopyalama
+        shutil.copy2(kobo_yolu, DB_PATH)
+        CACHE_SOZLUGU.clear()
+        
+        # Bulut ve GitHub senkronizasyonu
+        yedek_raporu = bulut_ve_git_yedekle()
+        
+        return jsonify({
+            "basarili": True,
+            "mesaj": "Veritabanı Kobo'dan başarıyla güncellendi!",
+            "kaynak": kobo_yolu,
+            "github_yedek": yedek_raporu["github"],
+            "cloud_drive_yedek": yedek_raporu["cloud_drive"]
+        })
+    except Exception as e:
+        return jsonify({
+            "basarili": False,
+            "mesaj": f"Eşitleme sırasında hata oluştu: {str(e)}"
+        }), 500
 
 
 @app.route('/api/kitap-detay/<path:volume_id>')
@@ -216,14 +320,22 @@ def api_kitap_detay(volume_id):
     
     detay_listesi = []
     for item_type, text, annotation, date_created, progress in satirlar:
-        is_note = (item_type and item_type.lower() == 'note') or (annotation is not None and annotation.strip() != '')
-        tur = "not" if is_note else "alinti"
+        item_type_lower = (item_type or "").lower()
+        has_note = (annotation is not None and annotation.strip() != '') or item_type_lower == 'note'
+        has_highlight = (text is not None and text.strip() != '') or item_type_lower == 'highlight'
+        
+        if has_note:
+            tur = "not"
+        elif has_highlight:
+            tur = "alinti"
+        else:
+            tur = "yer_imi"
         
         detay_listesi.append({
             "tur": tur,
             "alinti_metni": text if text else "",
             "kullanici_notu": annotation if annotation else "",
-            "tarih": tarih_formatla(date_created), # GG.AA.YYYY - SS:DK formatı
+            "tarih": tarih_formatla(date_created),
             "ilerleme": f"%{int(progress * 100)}" if progress else ""
         })
         

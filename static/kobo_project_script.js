@@ -1,4 +1,6 @@
 let tumKitaplar = [];
+let aktifDetaylar = [];
+let aktifFiltre = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
     kitaplariYukle();
@@ -73,14 +75,13 @@ function kitapKartlariniCiz(kitapListesi) {
             kitapDetayGoster(kitap);
         };
 
-        // Görseldeki Beyaz Kutu İçerik Yapısı Birebir Uygulandı
         kart.innerHTML = `
             <div class="kapak-container">
-                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak">
+                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak" loading="lazy">
             </div>
             <div class="kitap-bilgi">
-                <h3 class="kitap-baslik">${kitap.kitap_adi}</h3>
-                <p class="kitap-yazar">${kitap.yazar}</p>
+                <h3 class="kitap-baslik" title="${kitap.kitap_adi}">${kitap.kitap_adi}</h3>
+                <p class="kitap-yazar" title="${kitap.yazar}">${kitap.yazar}</p>
                 
                 <div class="sayfa-cizgi">${kitap.sayfa_sayisi !== '—' ? kitap.sayfa_sayisi : '—'}</div>
                 
@@ -93,6 +94,10 @@ function kitapKartlariniCiz(kitapListesi) {
                         <svg class="custom-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M19 3h-2V1h-2v2H9V1H7v2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H5V5h2v2h2V5h6v2h2V5h2v16zm-12-6h10v2H7v-2zm0-4h10v2H7v-2zm0-4h10v2H7V9z"/></svg>
                         ${kitap.not_sayisi}
                     </span>
+                    <span class="stat-item" title="Yer İmleri">
+                        <svg class="custom-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+                        ${kitap.yer_imi_sayisi || 0}
+                    </span>
                 </div>
             </div>
         `;
@@ -104,40 +109,90 @@ function kitapDetayGoster(kitap) {
     detayGörünümünüAc(kitap);
     
     const alintiListesi = document.getElementById('alinti-not-listesi');
-    alintiListesi.innerHTML = '<p class="yukleniyor">Alıntılar ve notlar yükleniyor...</p>';
+    alintiListesi.innerHTML = '<p class="yukleniyor">Yükleniyor...</p>';
 
     fetch(`/api/kitap-detay/${encodeURIComponent(kitap.volume_id)}`)
         .then(res => res.json())
         .then(detaylar => {
-            alintiListesi.innerHTML = '';
+            aktifDetaylar = detaylar || [];
+            
+            // Sayaçları güncelle
+            const alintiSayisi = aktifDetaylar.filter(d => d.tur === 'alinti').length;
+            const notSayisi = aktifDetaylar.filter(d => d.tur === 'not').length;
+            const yerImiSayisi = aktifDetaylar.filter(d => d.tur === 'yer_imi').length;
 
-            if (!detaylar || detaylar.length === 0) {
-                alintiListesi.innerHTML = '<p class="bos-mesaj">Bu kitap için henüz alıntı veya not eklenmemiş.</p>';
-                return;
-            }
+            document.getElementById('count-all').innerText = aktifDetaylar.length;
+            document.getElementById('count-alinti').innerText = alintiSayisi;
+            document.getElementById('count-not').innerText = notSayisi;
+            document.getElementById('count-yer_imi').innerText = yerImiSayisi;
 
-            detaylar.forEach(item => {
-                const kart = document.createElement('div');
-                kart.className = `alinti-karti ${item.tur === 'not' ? 'not-karti' : ''}`;
-
-                let icerikHTML = '';
-                if (item.alinti_metni) {
-                    icerikHTML += `<blockquote class="alinti-metni">"${item.alinti_metni}"</blockquote>`;
-                }
-                if (item.kullanici_notu) {
-                    icerikHTML += `<div class="kullanici-notu"><strong>Notum:</strong> ${item.kullanici_notu}</div>`;
-                }
-
-                kart.innerHTML = `
-                    ${icerikHTML}
-                    <div class="alinti-meta">
-                        <span>${item.ilerleme ? 'Konum: ' + item.ilerleme : ''}</span>
-                        <span>${item.tarih ? item.tarih : ''}</span>
-                    </div>
-                `;
-                alintiListesi.appendChild(kart);
-            });
+            // Varsayılan filtre: all
+            filtreDegistir('all', document.querySelector('.filter-tab[data-filter="all"]'));
+        })
+        .catch(err => {
+            console.error("Detay yükleme hatası:", err);
+            alintiListesi.innerHTML = '<p class="hata-mesaj">İçerik yüklenirken bir hata oluştu.</p>';
         });
+}
+
+function filtreDegistir(tur, element) {
+    aktifFiltre = tur;
+    
+    // Tab butonlarını aktif et
+    document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+    if (element) element.classList.add('active');
+
+    detayListesiniCiz();
+}
+
+function detayListesiniCiz() {
+    const alintiListesi = document.getElementById('alinti-not-listesi');
+    alintiListesi.innerHTML = '';
+
+    let gosterilecekler = aktifDetaylar;
+    if (aktifFiltre !== 'all') {
+        gosterilecekler = aktifDetaylar.filter(d => d.tur === aktifFiltre);
+    }
+
+    if (gosterilecekler.length === 0) {
+        alintiListesi.innerHTML = '<p class="bos-mesaj">Bu filtreye uygun kayıt bulunamadı.</p>';
+        return;
+    }
+
+    gosterilecekler.forEach(item => {
+        const kart = document.createElement('div');
+        let kartClass = 'alinti-karti';
+        if (item.tur === 'not') kartClass += ' not-karti';
+        if (item.tur === 'yer_imi') kartClass += ' yer-imi-karti';
+        kart.className = kartClass;
+
+        let icerikHTML = '';
+
+        if (item.tur === 'yer_imi') {
+            icerikHTML = `
+                <div class="yer-imi-icerik">
+                    <span class="yer-imi-rozet">🔖 Yer İmi (Kaldığın Sayfa)</span>
+                    ${item.alinti_metni ? `<p class="alinti-metni">${item.alinti_metni}</p>` : '<p class="yer-imi-aciklama">Bu sayfaya yer imi (bookmark) bırakıldı.</p>'}
+                </div>
+            `;
+        } else {
+            if (item.alinti_metni) {
+                icerikHTML += `<blockquote class="alinti-metni">"${item.alinti_metni}"</blockquote>`;
+            }
+            if (item.kullanici_notu) {
+                icerikHTML += `<div class="kullanici-notu"><strong>Notum:</strong> ${item.kullanici_notu}</div>`;
+            }
+        }
+
+        kart.innerHTML = `
+            ${icerikHTML}
+            <div class="alinti-meta">
+                <span>${item.ilerleme ? 'Konum: ' + item.ilerleme : ''}</span>
+                <span>${item.tarih ? item.tarih : ''}</span>
+            </div>
+        `;
+        alintiListesi.appendChild(kart);
+    });
 }
 
 function detayGörünümünüAc(kitap) {
@@ -161,4 +216,55 @@ function kitapFiltrele() {
         k.yazar.toLowerCase().includes(query)
     );
     kitapKartlariniCiz(filtrelenen);
+}
+
+// --- Kobo Cihaz Eşitleme ---
+function koboEsitle() {
+    const btnSync = document.getElementById('btn-sync');
+    if (btnSync) {
+        btnSync.classList.add('loading');
+        btnSync.disabled = true;
+    }
+
+    toastGoster("Kobo cihazı taranıyor ve senkronize ediliyor...", "info");
+
+    fetch('/api/kobo-esitle', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.basarili) {
+                let mesaj = data.mesaj;
+                if (data.github_yedek) {
+                    mesaj += " 🚀 (GitHub'a da yedeklendi)";
+                }
+                if (data.cloud_drive_yedek) {
+                    mesaj += " 📁 (Bulut klasörüne kopyalandı)";
+                }
+                toastGoster(mesaj, "success");
+                kitaplariYukle();
+            } else {
+                toastGoster(data.mesaj, "error");
+            }
+        })
+        .catch(err => {
+            console.error("Eşitleme hatası:", err);
+            toastGoster("Eşitleme sırasında bir bağlantı hatası oluştu.", "error");
+        })
+        .finally(() => {
+            if (btnSync) {
+                btnSync.classList.remove('loading');
+                btnSync.disabled = false;
+            }
+        });
+}
+
+function toastGoster(mesaj, tip = 'info') {
+    const toast = document.getElementById('toast-notification');
+    if (!toast) return;
+
+    toast.innerText = mesaj;
+    toast.className = `toast-notification show ${tip}`;
+
+    setTimeout(() => {
+        toast.className = 'toast-notification';
+    }, 4500);
 }
