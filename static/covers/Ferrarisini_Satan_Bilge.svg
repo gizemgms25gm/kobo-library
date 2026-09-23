@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" width="300" height="450">
+  <defs>
+    <linearGradient id="coverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2C3E50" />
+      <stop offset="100%" stop-color="#4CA1AF" />
+    </linearGradient>
+  </defs>
+  <rect width="300" height="450" rx="8" fill="url(#coverGrad)" />
+  <rect x="14" y="14" width="272" height="422" rx="4" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1.5" />
+  
+  <text x="150" y="150" fill="#ffffff" font-family="Georgia, serif" font-size="19" font-weight="bold" text-anchor="middle">
+    <tspan x="150" dy="0">Ferrarisini Satan</tspan><tspan x="150" dy="28">Bilge</tspan>
+  </text>
+  
+  <line x1="90" y1="260" x2="210" y2="260" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+  
+  <text x="150" y="295" fill="rgba(255,255,255,0.85)" font-family="-apple-system, sans-serif" font-size="13" font-weight="500" text-anchor="middle">
+    Robin S. Sharma
+  </text>
+  
+  <text x="150" y="415" fill="rgba(255,255,255,0.4)" font-family="-apple-system, sans-serif" font-size="9" text-anchor="middle" letter-spacing="2">
+    KOBO LIBRARY
+  </text>
+</svg>

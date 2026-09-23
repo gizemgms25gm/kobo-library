@@ -6,6 +6,9 @@ import subprocess
 import requests
 import urllib.parse
 import re
+import hashlib
+import html
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 app = Flask(__name__, static_folder='static')
@@ -24,6 +27,22 @@ if not os.path.exists(COVERS_DIR):
 
 CACHE_SOZLUGU = {}
 
+# Kitap kapağı için zengin gradyan renk paletleri
+KAPAK_GRADYANLARI = [
+    ('#1e3c72', '#2a5298'),
+    ('#134E5E', '#71B280'),
+    ('#4A00E0', '#8E2DE2'),
+    ('#2C3E50', '#4CA1AF'),
+    ('#3E5151', '#DECBA4'),
+    ('#434343', '#191919'),
+    ('#870000', '#2B0B00'),
+    ('#5A3F37', '#2C7744'),
+    ('#283048', '#859398'),
+    ('#614385', '#516395'),
+    ('#000428', '#004e92'),
+    ('#780206', '#061161')
+]
+
 
 # --- TARİH FORMATLAYICI (GG.AA.YYYY - SS:DK) ---
 def tarih_formatla(tarih_metni):
@@ -38,7 +57,7 @@ def tarih_formatla(tarih_metni):
 
 
 def kobo_surucusu_bul():
-    """Bağlı USB sürücülerinde Kobo veritabanını (.kobo/KoboReader.sqlite) arar."""
+    """Bağlı USB sürücülerinde Kobo kök dizinini ve veritabanını arar."""
     suruculer = [f"{chr(h)}:\\" for h in range(ord('D'), ord('Z') + 1)]
     for surucu in suruculer:
         if os.path.exists(surucu):
@@ -49,15 +68,42 @@ def kobo_surucusu_bul():
             ]
             for yol in olasi_yollar:
                 if os.path.exists(yol):
-                    return yol
-    return None
+                    return surucu, yol
+    return None, None
+
+
+def kobo_cihaz_kapaklarini_kopyala(surucu_koku):
+    """Kobo'nun cihaz içinde sakladığı .kobo-images/ altındaki orijinal kapakları projeye aktarır."""
+    if not surucu_koku:
+        return 0
+    
+    images_dir = os.path.join(surucu_koku, '.kobo-images')
+    if not os.path.exists(images_dir):
+        return 0
+    
+    kopyalanan = 0
+    try:
+        for root, _, files in os.walk(images_dir):
+            for file in files:
+                if file.endswith('.parsed') and ('N3_LIBRARY_GRID' in file or 'N3_FULL' in file or 'N3_LIBRARY_SHELF' in file):
+                    base_id = file.split(' - ')[0].replace('file____mnt_onboard_', '').replace('.kepub.epub', '').replace('.epub', '')
+                    safe_name = re.sub(r'[^\w]', '_', base_id).strip('_')
+                    if safe_name:
+                        hedef = os.path.join(COVERS_DIR, f"{safe_name}.jpg")
+                        kaynak = os.path.join(root, file)
+                        if not os.path.exists(hedef) or os.path.getsize(hedef) == 0:
+                            shutil.copy2(kaynak, hedef)
+                            kopyalanan += 1
+    except Exception as e:
+        print("Cihaz kapakları kopyalanırken uyarı:", e)
+        
+    return kopyalanan
 
 
 def bulut_ve_git_yedekle():
     """Veritabanı güncellendiğinde GitHub ve varsa Google Drive / OneDrive'a yedekler."""
     rapor = {"github": False, "cloud_drive": None}
     
-    # 1. Google Drive / OneDrive Yedeği (Varsa)
     kullanici_dizini = os.path.expanduser("~")
     olasi_bulut_dizinleri = [
         os.path.join(kullanici_dizini, "Google Drive", "Kobo_Backup"),
@@ -78,7 +124,6 @@ def bulut_ve_git_yedekle():
         except Exception as e:
             print("Bulut klasörü kopyalama uyarısı:", e)
 
-    # 2. GitHub Otomatik Commit & Push
     try:
         zaman_damgasi = datetime.now().strftime("%d.%m.%Y %H:%M")
         subprocess.run(["git", "add", "."], cwd=BASE_DIR, check=True, capture_output=True)
@@ -92,71 +137,219 @@ def bulut_ve_git_yedekle():
     return rapor
 
 
-def canlı_google_sayfa_ara(kitap_adi, yazar_adi):
+def internet_sayfa_ara(kitap_adi, yazar_adi):
+    """Google Books ve Open Library üzerinden sayfa sayısı ve kapak arar."""
+    clean_title = re.sub(r'[^\w\s]', '', kitap_adi).strip()
+    
+    # 1. Open Library Arama
     try:
-        clean_title = re.sub(r'[^\w\s]', '', kitap_adi)
-        sorgu = f"{clean_title} {yazar_adi}" if yazar_adi else clean_title
-        url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(sorgu)}&maxResults=5"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        res = requests.get(url, headers=headers, timeout=4)
+        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
+        url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(sorgu)}&limit=1"
+        res = requests.get(url, timeout=2)
+        if res.status_code == 200:
+            docs = res.json().get('docs', [])
+            if docs:
+                d = docs[0]
+                sayfa = d.get('number_of_pages_median')
+                cover_id = d.get('cover_i')
+                cover_url = f"https://covers.openlibrary.org/b/id/{cover_id}-L.jpg" if cover_id else None
+                if sayfa and isinstance(sayfa, int) and 30 <= sayfa <= 2500:
+                    return sayfa, cover_url
+                if cover_url:
+                    return None, cover_url
+    except Exception:
+        pass
+
+    # 2. Google Books Arama
+    try:
+        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
+        url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(sorgu)}&maxResults=1"
+        headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        res = requests.get(url, headers=headers, timeout=2)
         if res.status_code == 200:
             data = res.json()
             for item in data.get("items", []):
-                pc = item.get("volumeInfo", {}).get("pageCount")
-                if pc and isinstance(pc, int) and 50 <= pc <= 1500:
-                    return pc
-    except Exception as e:
-        print(f"Google Arama Hatası ({kitap_adi}):", e)
-
-    try:
-        clean_title = re.sub(r'[^\w\s]', '', kitap_adi)
-        url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(clean_title)}&maxResults=5"
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            for item in res.json().get("items", []):
-                pc = item.get("volumeInfo", {}).get("pageCount")
-                if pc and isinstance(pc, int) and 50 <= pc <= 1500:
-                    return pc
-    except:
+                v_info = item.get("volumeInfo", {})
+                pc = v_info.get("pageCount")
+                thumb = v_info.get("imageLinks", {}).get("thumbnail") or v_info.get("imageLinks", {}).get("smallThumbnail")
+                if pc and isinstance(pc, int) and 30 <= pc <= 2500:
+                    return pc, thumb
+                if thumb:
+                    return None, thumb
+    except Exception:
         pass
 
-    return "Bilinmiyor"
+    return None, None
 
 
-def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi):
+def şık_svg_kapak_uret(kitap_adi, yazar_adi, dosya_yolu):
+    """Kapağı internette bulunamayan veya Wattpad kitapları için şık bir vektörel kapak üretir."""
+    try:
+        h = int(hashlib.md5(kitap_adi.encode('utf-8')).hexdigest(), 16)
+        c1, c2 = KAPAK_GRADYANLARI[h % len(KAPAK_GRADYANLARI)]
+        
+        clean_title = html.escape(kitap_adi)
+        clean_author = html.escape(yazar_adi if yazar_adi else "Kobo Kitaplığı")
+        
+        words = clean_title.split()
+        lines = []
+        curr = ""
+        for w in words:
+            if len(curr + " " + w) <= 18:
+                curr = (curr + " " + w).strip()
+            else:
+                if curr:
+                    lines.append(curr)
+                curr = w
+        if curr:
+            lines.append(curr)
+        lines = lines[:4]
+        
+        tspan_list = []
+        for i, l in enumerate(lines):
+            dy = 28 if i > 0 else 0
+            tspan_list.append(f'<tspan x="150" dy="{dy}">{l}</tspan>')
+        title_tspans = "".join(tspan_list)
+        
+        svg_content = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" width="300" height="450">
+  <defs>
+    <linearGradient id="coverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="{c1}" />
+      <stop offset="100%" stop-color="{c2}" />
+    </linearGradient>
+  </defs>
+  <rect width="300" height="450" rx="8" fill="url(#coverGrad)" />
+  <rect x="14" y="14" width="272" height="422" rx="4" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1.5" />
+  
+  <text x="150" y="145" fill="#ffffff" font-family="Georgia, serif" font-size="19" font-weight="bold" text-anchor="middle">
+    {title_tspans}
+  </text>
+  
+  <line x1="90" y1="260" x2="210" y2="260" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+  
+  <text x="150" y="295" fill="rgba(255,255,255,0.85)" font-family="-apple-system, sans-serif" font-size="13" font-weight="500" text-anchor="middle">
+    {clean_author}
+  </text>
+  
+  <text x="150" y="415" fill="rgba(255,255,255,0.4)" font-family="-apple-system, sans-serif" font-size="9" text-anchor="middle" letter-spacing="2">
+    KOBO LIBRARY
+  </text>
+</svg>'''
+        with open(dosya_yolu, 'w', encoding='utf-8') as f:
+            f.write(svg_content)
+        return True
+    except Exception as e:
+        print("SVG kapak üretme hatası:", e)
+        return False
+
+
+def kapak_indir_ve_yerel_yol_dondur(kitap_adi, yazar_adi, image_id=""):
+    """Kitap kapağını yerelde, cihaz önbelleğinde, iTunes veya OpenLibrary'de arar; bulunamazsa SVG üretir."""
     safe_title = re.sub(r'[^\w]', '_', kitap_adi).strip('_')
-    dosya_adi = f"{safe_title}.jpg"
-    yerel_dosya_yolu = os.path.join(COVERS_DIR, dosya_adi)
-    web_resim_yolu = f"/static/covers/{dosya_adi}"
+    dosya_adi_jpg = f"{safe_title}.jpg"
+    dosya_adi_svg = f"{safe_title}.svg"
+    
+    yerel_jpg = os.path.join(COVERS_DIR, dosya_adi_jpg)
+    yerel_svg = os.path.join(COVERS_DIR, dosya_adi_svg)
+    
+    if os.path.exists(yerel_jpg) and os.path.getsize(yerel_jpg) > 0:
+        return f"/static/covers/{dosya_adi_jpg}"
+    if os.path.exists(yerel_svg) and os.path.getsize(yerel_svg) > 0:
+        return f"/static/covers/{dosya_adi_svg}"
 
-    if os.path.exists(yerel_dosya_yolu):
-        return web_resim_yolu
+    if image_id:
+        img_id_clean = re.sub(r'[^\w]', '_', image_id).strip('_')
+        img_id_path = os.path.join(COVERS_DIR, f"{img_id_clean}.jpg")
+        if os.path.exists(img_id_path) and os.path.getsize(img_id_path) > 0:
+            return f"/static/covers/{img_id_clean}.jpg"
 
+    # 1. iTunes Arama
     resim_url = None
     try:
-        sorgu = f"{kitap_adi} {yazar_adi}"
+        clean_title = re.sub(r'[^\w\s]', '', kitap_adi).strip()
+        sorgu = f"{clean_title} {yazar_adi}" if (yazar_adi and yazar_adi != "Bilinmeyen yazar") else clean_title
         url = f"https://itunes.apple.com/search?term={urllib.parse.quote(sorgu)}&entity=ebook&limit=1"
-        res = requests.get(url, timeout=3)
+        res = requests.get(url, timeout=1.5)
         if res.status_code == 200:
             results = res.json().get("results", [])
             if results and results[0].get("artworkUrl100"):
                 resim_url = results[0]["artworkUrl100"].replace("100x100bb", "600x600bb")
-    except:
+    except Exception:
         pass
 
+    # 2. Open Library / Google Arama
+    if not resim_url:
+        _, inet_thumb = internet_sayfa_ara(kitap_adi, yazar_adi)
+        if inet_thumb:
+            resim_url = inet_thumb
+
+    # Resmi indir ve kaydet
     if resim_url:
         try:
-            img_data = requests.get(resim_url, timeout=5).content
-            with open(yerel_dosya_yolu, 'wb') as handler:
-                handler.write(img_data)
-            return web_resim_yolu
-        except:
+            img_data = requests.get(resim_url, timeout=3).content
+            if img_data and len(img_data) > 500:
+                with open(yerel_jpg, 'wb') as handler:
+                    handler.write(img_data)
+                return f"/static/covers/{dosya_adi_jpg}"
+        except Exception:
             pass
 
+    # 3. Bulunamadıysa (Örn: Wattpad kitapları) şık bir SVG kapak üret
+    if şık_svg_kapak_uret(kitap_adi, yazar_adi, yerel_svg):
+        return f"/static/covers/{dosya_adi_svg}"
+
     return f"https://placehold.co/400x600/2C2A29/FFFFFF?text={urllib.parse.quote(kitap_adi)}"
+
+
+def kitap_meta_cozumle(kitap_ham):
+    """Tek bir kitap için sayfa sayısını (Kobo veritabanı kelime sayısından tam hesaplayarak) ve kapağını hazırlar."""
+    content_id, title, author, store_pages, num_pages, image_id, word_count, alinti_sayisi, not_sayisi, yer_imi_sayisi, idx = kitap_ham
+    yazar = author if author and author.strip() else "Bilinmeyen Yazar"
+    cache_key = f"{title}_{yazar}"
+    
+    # 1. Sayfa Sayısı Hesaplama Mantığı (Veritabanından & Hızlı)
+    sayfa_sayisi_sayi = 0
+    if store_pages and isinstance(store_pages, int) and store_pages > 0:
+        sayfa_sayisi_sayi = store_pages
+    elif num_pages and isinstance(num_pages, int) and num_pages > 0:
+        sayfa_sayisi_sayi = num_pages
+    elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
+        # Standart yayıncılık kuralı: 1 sayfa ≈ 260 kelime
+        sayfa_sayisi_sayi = max(1, round(word_count / 260))
+
+    if cache_key in CACHE_SOZLUGU:
+        kapak_url = CACHE_SOZLUGU[cache_key]["kapak_url"]
+        if sayfa_sayisi_sayi == 0 and CACHE_SOZLUGU[cache_key]["sayfa_sayisi_sayi"] > 0:
+            sayfa_sayisi_sayi = CACHE_SOZLUGU[cache_key]["sayfa_sayisi_sayi"]
+    else:
+        kapak_url = kapak_indir_ve_yerel_yol_dondur(title, yazar, image_id)
+        
+        if sayfa_sayisi_sayi == 0:
+            inet_sayfa, _ = internet_sayfa_ara(title, yazar)
+            if inet_sayfa:
+                sayfa_sayisi_sayi = inet_sayfa
+        
+        CACHE_SOZLUGU[cache_key] = {
+            "kapak_url": kapak_url,
+            "sayfa_sayisi": f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—",
+            "sayfa_sayisi_sayi": sayfa_sayisi_sayi
+        }
+
+    sayfa_metni = f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—"
+
+    return {
+        "id": idx,
+        "volume_id": content_id,
+        "kitap_adi": title,
+        "yazar": yazar,
+        "kategori": "Edebiyat",
+        "kapak_url": kapak_url,
+        "sayfa_sayisi": sayfa_metni,
+        "toplam_sayfa": sayfa_sayisi_sayi,
+        "alinti_sayisi": alinti_sayisi,
+        "not_sayisi": not_sayisi,
+        "yer_imi_sayisi": yer_imi_sayisi
+    }
 
 
 def kobo_kitaplarini_getir():
@@ -166,86 +359,45 @@ def kobo_kitaplarini_getir():
     baglanti = sqlite3.connect(DB_PATH)
     imlec = baglanti.cursor()
     
+    # Tüm Kobo kitaplarını ve kelime sayılarını al
     sorgu = """
-    SELECT Title, Attribution, StorePages, ContentID
-    FROM content 
-    WHERE ContentType = 6 
-      AND Title IS NOT NULL 
-      AND BookID IS NULL
-      AND (IsDownloaded IS NULL OR LOWER(IsDownloaded) = 'true' OR IsDownloaded = 1 OR IsDownloaded = '1')
-    ORDER BY Title ASC
+    SELECT c.ContentID, c.Title, c.Attribution, c.StorePages, c.___NumPages, c.ImageId,
+           (SELECT SUM(w.WordCount) FROM content w WHERE w.BookID = c.ContentID AND w.WordCount > 0) as total_words,
+           COUNT(CASE WHEN LOWER(b.Type) = 'highlight' OR (b.Text IS NOT NULL AND b.Text != '' AND (b.Annotation IS NULL OR b.Annotation = '')) THEN 1 END) as alinti_sayisi,
+           COUNT(CASE WHEN LOWER(b.Type) = 'note' OR (b.Annotation IS NOT NULL AND b.Annotation != '') THEN 1 END) as not_sayisi,
+           COUNT(CASE WHEN LOWER(b.Type) = 'bookmark' OR LOWER(b.Type) = 'dogear' OR ((b.Text IS NULL OR b.Text = '') AND (b.Annotation IS NULL OR b.Annotation = '')) THEN 1 END) as yer_imi_sayisi
+    FROM content c
+    LEFT JOIN Bookmark b ON (b.VolumeID = c.ContentID OR b.VolumeID LIKE '%' || c.Title || '%')
+    WHERE c.ContentType = 6 
+      AND c.Title IS NOT NULL 
+      AND c.BookID IS NULL
+    GROUP BY c.ContentID
+    ORDER BY c.Title ASC
     """
     
     try:
         imlec.execute(sorgu)
         satirlar = imlec.fetchall()
     except sqlite3.OperationalError:
-        yedek_sorgu = """
-        SELECT Title, Attribution, StorePages, ContentID
-        FROM content 
-        WHERE ContentType = 6 
-          AND Title IS NOT NULL 
-          AND BookID IS NULL
-        ORDER BY Title ASC
-        """
-        imlec.execute(yedek_sorgu)
-        satirlar = imlec.fetchall()
-    
-    kitaplar = []
-    id_counter = 1
-    
-    for title, author, store_pages, content_id in satirlar:
-        yazar = author if author else "Bilinmeyen Yazar"
-        cache_key = f"{title}_{yazar}"
-        
         imlec.execute("""
-            SELECT 
-                COUNT(CASE WHEN LOWER(Type) = 'highlight' OR (Text IS NOT NULL AND Text != '' AND (Annotation IS NULL OR Annotation = '')) THEN 1 END) as alinti_sayisi,
-                COUNT(CASE WHEN LOWER(Type) = 'note' OR (Annotation IS NOT NULL AND Annotation != '') THEN 1 END) as not_sayisi,
-                COUNT(CASE WHEN LOWER(Type) = 'bookmark' OR LOWER(Type) = 'dogear' OR ((Text IS NULL OR Text = '') AND (Annotation IS NULL OR Annotation = '')) THEN 1 END) as yer_imi_sayisi
-            FROM Bookmark 
-            WHERE VolumeID = ? OR VolumeID LIKE ?
-        """, (content_id, f"%{title}%"))
-        
-        stats = imlec.fetchone()
-        alinti_sayisi = stats[0] if stats else 0
-        not_sayisi = stats[1] if stats else 0
-        yer_imi_sayisi = stats[2] if stats else 0
-
-        if cache_key in CACHE_SOZLUGU:
-            kapak_url = CACHE_SOZLUGU[cache_key]["kapak_url"]
-            sayfa_sayisi = CACHE_SOZLUGU[cache_key]["sayfa_sayisi"]
-        else:
-            kapak_url = kapak_indir_ve_yerel_yol_dondur(title, yazar)
-            internet_sayfa = canlı_google_sayfa_ara(title, yazar)
-            
-            if internet_sayfa != "Bilinmiyor":
-                sayfa_sayisi = f"{internet_sayfa} sayfa"
-            elif store_pages and isinstance(store_pages, int) and store_pages > 0:
-                sayfa_sayisi = f"{store_pages} sayfa (Kobo)"
-            else:
-                sayfa_sayisi = "—"
-            
-            CACHE_SOZLUGU[cache_key] = {
-                "kapak_url": kapak_url,
-                "sayfa_sayisi": sayfa_sayisi
-            }
-        
-        kitaplar.append({
-            "id": id_counter,
-            "volume_id": content_id,
-            "kitap_adi": title,
-            "yazar": yazar,
-            "kategori": "Edebiyat",
-            "kapak_url": kapak_url,
-            "sayfa_sayisi": sayfa_sayisi,
-            "alinti_sayisi": alinti_sayisi,
-            "not_sayisi": not_sayisi,
-            "yer_imi_sayisi": yer_imi_sayisi
-        })
-        id_counter += 1
+            SELECT ContentID, Title, Attribution, StorePages, ___NumPages, ImageId, 0, 0, 0, 0
+            FROM content 
+            WHERE ContentType = 6 AND Title IS NOT NULL AND BookID IS NULL
+            ORDER BY Title ASC
+        """)
+        satirlar = imlec.fetchall()
         
     baglanti.close()
+    
+    kitap_ham_listesi = []
+    for idx, row in enumerate(satirlar, 1):
+        content_id, title, author, store_pages, num_pages, image_id, word_count, alinti, notlar, yer_imi = row
+        kitap_ham_listesi.append((content_id, title, author, store_pages, num_pages, image_id, word_count, alinti, notlar, yer_imi, idx))
+
+    # Hızlı paralel çözümleme
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        kitaplar = list(executor.map(kitap_meta_cozumle, kitap_ham_listesi))
+
     return kitaplar
 
 
@@ -261,16 +413,17 @@ def api_kitaplar():
 
 @app.route('/api/cihaz-durumu')
 def api_cihaz_durumu():
-    kobo_yolu = kobo_surucusu_bul()
+    surucu, kobo_yolu = kobo_surucusu_bul()
     return jsonify({
         "bagli": kobo_yolu is not None,
+        "surucu_koku": surucu if surucu else "",
         "surucu_yolu": kobo_yolu if kobo_yolu else ""
     })
 
 
 @app.route('/api/kobo-esitle', methods=['POST', 'GET'])
 def api_kobo_esitle():
-    kobo_yolu = kobo_surucusu_bul()
+    surucu, kobo_yolu = kobo_surucusu_bul()
     if not kobo_yolu:
         return jsonify({
             "basarili": False, 
@@ -278,16 +431,21 @@ def api_kobo_esitle():
         }), 404
 
     try:
-        # Cihazdan projeye kopyalama
+        # 1. Cihazdan projeye veritabanını kopyalama
         shutil.copy2(kobo_yolu, DB_PATH)
+        
+        # 2. Cihazın içindeki kapakları (Wattpad/özel kitaplar dahil) kopyalama
+        kopyalanan_kapak = kobo_cihaz_kapaklarini_kopyala(surucu)
+        
+        # 3. Önbelleği temizleme
         CACHE_SOZLUGU.clear()
         
-        # Bulut ve GitHub senkronizasyonu
+        # 4. Bulut ve GitHub senkronizasyonu
         yedek_raporu = bulut_ve_git_yedekle()
         
         return jsonify({
             "basarili": True,
-            "mesaj": "Veritabanı Kobo'dan başarıyla güncellendi!",
+            "mesaj": f"Veritabanı Kobo'dan başarıyla eşitlendi! ({kopyalanan_kapak} yeni kapak aktarıldı)",
             "kaynak": kobo_yolu,
             "github_yedek": yedek_raporu["github"],
             "cloud_drive_yedek": yedek_raporu["cloud_drive"]
@@ -307,7 +465,35 @@ def api_kitap_detay(volume_id):
     baglanti = sqlite3.connect(DB_PATH)
     imlec = baglanti.cursor()
     
-    # DateCreated DESC ile kronolojik sıralama (en yeni en üstte)
+    # Kitabın toplam sayfa sayısını bul
+    imlec.execute("""
+        SELECT Title, Attribution, ___NumPages, StorePages,
+               (SELECT SUM(w.WordCount) FROM content w WHERE w.BookID = c.ContentID AND w.WordCount > 0) as total_words
+        FROM content c
+        WHERE c.ContentID = ? OR c.ContentID LIKE ? OR c.Title = ?
+        LIMIT 1
+    """, (volume_id, f"%{volume_id}%", volume_id))
+    kitap_bilgi = imlec.fetchone()
+    
+    toplam_sayfa = 0
+    if kitap_bilgi:
+        title, author, num_pages, store_pages, total_words = kitap_bilgi
+        if store_pages and isinstance(store_pages, int) and store_pages > 0:
+            toplam_sayfa = store_pages
+        elif num_pages and isinstance(num_pages, int) and num_pages > 0:
+            toplam_sayfa = num_pages
+        elif total_words and isinstance(total_words, (int, float)) and total_words > 0:
+            toplam_sayfa = max(1, round(total_words / 260))
+        else:
+            cache_key = f"{title}_{author}"
+            if cache_key in CACHE_SOZLUGU and CACHE_SOZLUGU[cache_key]["sayfa_sayisi_sayi"] > 0:
+                toplam_sayfa = CACHE_SOZLUGU[cache_key]["sayfa_sayisi_sayi"]
+            else:
+                inet_sayfa, _ = internet_sayfa_ara(title, author)
+                if inet_sayfa:
+                    toplam_sayfa = inet_sayfa
+
+    # Alıntıları ve notları kronolojik çek
     sorgu = """
     SELECT Type, Text, Annotation, DateCreated, ChapterProgress
     FROM Bookmark
@@ -331,12 +517,22 @@ def api_kitap_detay(volume_id):
         else:
             tur = "yer_imi"
         
+        # Konum formatlama: "%58 - Sayfa 677" veya "%58"
+        ilerleme_metni = ""
+        if progress is not None and isinstance(progress, (int, float)):
+            yuzde = int(round(progress * 100))
+            if toplam_sayfa > 0:
+                hesaplanan_sayfa = max(1, int(round(progress * toplam_sayfa)))
+                ilerleme_metni = f"%{yuzde} - Sayfa {hesaplanan_sayfa}"
+            else:
+                ilerleme_metni = f"%{yuzde}"
+
         detay_listesi.append({
             "tur": tur,
             "alinti_metni": text if text else "",
             "kullanici_notu": annotation if annotation else "",
             "tarih": tarih_formatla(date_created),
-            "ilerleme": f"%{int(progress * 100)}" if progress else ""
+            "ilerleme": ilerleme_metni
         })
         
     return jsonify(detay_listesi)

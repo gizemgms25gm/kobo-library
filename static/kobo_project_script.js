@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Google / Tarayıcı Geri Tuşuna Basınca Sayfa Yenilenmeden Dönme
+    // Tarayıcı Geri/İleri Butonu
     window.addEventListener('popstate', (event) => {
         if (event.state && event.state.view === 'detay') {
             const kitap = tumKitaplar.find(k => k.volume_id === event.state.volume_id);
@@ -46,13 +46,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function kitaplariYukle() {
-    fetch('/api/kitaplar')
+    const listeContainer = document.getElementById('kitap-listesi');
+    if (tumKitaplar.length === 0 && listeContainer) {
+        listeContainer.innerHTML = '<p class="yukleniyor">Kütüphane taranıyor ve kitaplar yükleniyor...</p>';
+    }
+
+    // Tarayıcı önbelleğini aşmak için timestamp ekliyoruz
+    fetch(`/api/kitaplar?t=${Date.now()}`)
         .then(res => res.json())
         .then(kitaplar => {
             tumKitaplar = kitaplar;
             kitapKartlariniCiz(tumKitaplar);
         })
-        .catch(err => console.error("Kitaplar yüklenirken hata:", err));
+        .catch(err => {
+            console.error("Kitaplar yüklenirken hata:", err);
+            if (listeContainer) listeContainer.innerHTML = '<p class="hata-mesaj">Kitaplar yüklenirken bir hata oluştu.</p>';
+        });
 }
 
 function kitapKartlariniCiz(kitapListesi) {
@@ -77,7 +86,7 @@ function kitapKartlariniCiz(kitapListesi) {
 
         kart.innerHTML = `
             <div class="kapak-container">
-                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak" loading="lazy">
+                <img src="${kitap.kapak_url}" alt="${kitap.kitap_adi}" class="kitap-kapak" loading="lazy" onerror="this.src='/static/covers/placeholder.svg'">
             </div>
             <div class="kitap-bilgi">
                 <h3 class="kitap-baslik" title="${kitap.kitap_adi}">${kitap.kitap_adi}</h3>
@@ -109,9 +118,9 @@ function kitapDetayGoster(kitap) {
     detayGörünümünüAc(kitap);
     
     const alintiListesi = document.getElementById('alinti-not-listesi');
-    alintiListesi.innerHTML = '<p class="yukleniyor">Yükleniyor...</p>';
+    alintiListesi.innerHTML = '<p class="yukleniyor">Alıntılar, notlar ve yer imleri yükleniyor...</p>';
 
-    fetch(`/api/kitap-detay/${encodeURIComponent(kitap.volume_id)}`)
+    fetch(`/api/kitap-detay/${encodeURIComponent(kitap.volume_id)}?t=${Date.now()}`)
         .then(res => res.json())
         .then(detaylar => {
             aktifDetaylar = detaylar || [];
@@ -138,7 +147,6 @@ function kitapDetayGoster(kitap) {
 function filtreDegistir(tur, element) {
     aktifFiltre = tur;
     
-    // Tab butonlarını aktif et
     document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
     if (element) element.classList.add('active');
 
@@ -155,7 +163,7 @@ function detayListesiniCiz() {
     }
 
     if (gosterilecekler.length === 0) {
-        alintiListesi.innerHTML = '<p class="bos-mesaj">Bu filtreye uygun kayıt bulunamadı.</p>';
+        alintiListesi.innerHTML = '<p class="bos-mesaj">Bu kategoride henüz kayıt bulunmuyor.</p>';
         return;
     }
 
@@ -172,7 +180,7 @@ function detayListesiniCiz() {
             icerikHTML = `
                 <div class="yer-imi-icerik">
                     <span class="yer-imi-rozet">🔖 Yer İmi (Kaldığın Sayfa)</span>
-                    ${item.alinti_metni ? `<p class="alinti-metni">${item.alinti_metni}</p>` : '<p class="yer-imi-aciklama">Bu sayfaya yer imi (bookmark) bırakıldı.</p>'}
+                    ${item.alinti_metni ? `<p class="alinti-metni">${item.alinti_metni}</p>` : '<p class="yer-imi-aciklama">Bu sayfaya yer imi bırakıldı.</p>'}
                 </div>
             `;
         } else {
@@ -187,8 +195,8 @@ function detayListesiniCiz() {
         kart.innerHTML = `
             ${icerikHTML}
             <div class="alinti-meta">
-                <span>${item.ilerleme ? 'Konum: ' + item.ilerleme : ''}</span>
-                <span>${item.tarih ? item.tarih : ''}</span>
+                <span class="konum-etiket">${item.ilerleme ? '📍 ' + item.ilerleme : ''}</span>
+                <span class="tarih-etiket">${item.tarih ? '🕒 ' + item.tarih : ''}</span>
             </div>
         `;
         alintiListesi.appendChild(kart);
@@ -226,20 +234,18 @@ function koboEsitle() {
         btnSync.disabled = true;
     }
 
-    toastGoster("Kobo cihazı taranıyor ve senkronize ediliyor...", "info");
+    toastGoster("Kobo taranıyor ve yeni kitaplar aktarılıyor...", "info");
 
-    fetch('/api/kobo-esitle', { method: 'POST' })
+    fetch(`/api/kobo-esitle?t=${Date.now()}`, { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             if (data.basarili) {
                 let mesaj = data.mesaj;
                 if (data.github_yedek) {
-                    mesaj += " 🚀 (GitHub'a da yedeklendi)";
-                }
-                if (data.cloud_drive_yedek) {
-                    mesaj += " 📁 (Bulut klasörüne kopyalandı)";
+                    mesaj += " 🚀 GitHub'a da yedeklendi.";
                 }
                 toastGoster(mesaj, "success");
+                // Kitapları anında sayfayı yenilemeden güncelle
                 kitaplariYukle();
             } else {
                 toastGoster(data.mesaj, "error");
