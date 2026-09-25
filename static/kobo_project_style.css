@@ -734,3 +734,222 @@ body.dark-mode .kapak-secenek-tabs {
     color: var(--text-color);
     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
+
+/* --- İstatistikler & Isı Haritası Modalı --- */
+.modal-large {
+    max-width: 780px !important;
+    width: 90% !important;
+}
+
+.stats-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-summary-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid var(--border-color);
+    padding: 14px 16px;
+    border-radius: 12px;
+}
+
+body.dark-mode .stat-summary-card {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.stat-card-icon {
+    font-size: 1.6rem;
+}
+
+.stat-card-content h4 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--text-color);
+    font-weight: 700;
+}
+
+.stat-card-content span {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Okuma Durumu Çubuğu */
+.reading-progress-section {
+    margin-bottom: 15px;
+}
+
+.progress-labels {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.legend-item {
+    margin-left: 12px;
+    font-size: 0.78rem;
+}
+
+.legend-bitti { color: #34c759; }
+.legend-okunuyor { color: #007aff; }
+.legend-okunmadi { color: #8e8e93; }
+
+.multi-progress-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.08);
+}
+
+body.dark-mode .multi-progress-bar {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.bar-segment {
+    height: 100%;
+    transition: width 0.4s ease;
+}
+
+.bar-bitti { background: #34c759; }
+.bar-okunuyor { background: #007aff; }
+.bar-okunmadi { background: rgba(142, 142, 147, 0.4); }
+
+/* Aktivite Isı Haritası */
+.heatmap-section {
+    margin: 15px 0;
+}
+
+.heatmap-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.heatmap-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-color);
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.heatmap-grid-scroll {
+    display: flex;
+    gap: 3px;
+    overflow-x: auto;
+    padding: 8px 4px 12px 4px;
+}
+
+.heatmap-col {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.heat-box {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+    cursor: pointer;
+}
+
+.heat-box:hover {
+    transform: scale(1.3);
+    z-index: 10;
+}
+
+.heat-box.lvl-0 { background: rgba(0, 0, 0, 0.06); }
+.heat-box.lvl-1 { background: #9be9a8; }
+.heat-box.lvl-2 { background: #40c463; }
+.heat-box.lvl-3 { background: #30a14e; }
+.heat-box.lvl-4 { background: #216e39; }
+
+body.dark-mode .heat-box.lvl-0 { background: rgba(255, 255, 255, 0.08); }
+body.dark-mode .heat-box.lvl-1 { background: #0e4429; }
+body.dark-mode .heat-box.lvl-2 { background: #006d32; }
+body.dark-mode .heat-box.lvl-3 { background: #26a641; }
+body.dark-mode .heat-box.lvl-4 { background: #39d353; }
+
+.heatmap-tooltip {
+    position: fixed;
+    display: none;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    pointer-events: none;
+    z-index: 10000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* En Çok Not Alınan Kitaplar */
+.top-books-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 0.95rem;
+}
+
+.top-books-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.top-book-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+body.dark-mode .top-book-item {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.top-book-rank {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--accent-color);
+    width: 24px;
+}
+
+.top-book-info {
+    flex: 1;
+}
+
+.top-book-title {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
+.top-book-author {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.top-book-count {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--note-color);
+}

@@ -537,6 +537,141 @@ function ayarlariKaydet() {
     });
 }
 
+// --- Okuma İstatistikleri & Isı Haritası ---
+function istatistikleriAc() {
+    const modal = document.getElementById('analytics-modal');
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+
+    fetch(`/api/istatistikler?t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => {
+            istatistikleriCiz(data);
+        })
+        .catch(err => {
+            console.error("İstatistik yükleme hatası:", err);
+            toastGoster("İstatistikler yüklenirken hata oluştu.", "error");
+        });
+}
+
+function istatistikleriKapat() {
+    const modal = document.getElementById('analytics-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function istatistikleriCiz(data) {
+    // 1. Özet Kartlar
+    document.getElementById('stat-total-time').innerText = `${data.toplam_saat || 0} Saat`;
+    document.getElementById('stat-total-books').innerText = `${data.toplam_kitap || 0} Kitap`;
+    document.getElementById('stat-finished-books').innerText = `${data.bitti || 0}`;
+    document.getElementById('stat-total-highlights').innerText = `${(data.toplam_alinti || 0) + (data.toplam_not || 0)}`;
+
+    // 2. Okuma Durumu Çubuğu
+    const toplam = data.toplam_kitap || 1;
+    const pBitti = Math.round(((data.bitti || 0) / toplam) * 100);
+    const pOkunuyor = Math.round(((data.okunuyor || 0) / toplam) * 100);
+    const pOkunmadi = Math.max(0, 100 - pBitti - pOkunuyor);
+
+    document.getElementById('count-stat-bitti').innerText = data.bitti || 0;
+    document.getElementById('count-stat-okunuyor').innerText = data.okunuyor || 0;
+    document.getElementById('count-stat-okunmadi').innerText = data.okunmadi || 0;
+
+    document.getElementById('bar-bitti').style.width = `${pBitti}%`;
+    document.getElementById('bar-okunuyor').style.width = `${pOkunuyor}%`;
+    document.getElementById('bar-okunmadi').style.width = `${pOkunmadi}%`;
+
+    // 3. Isı Haritası
+    isiHaritasiOlustur(data.gunluk_aktivite || {});
+
+    // 4. En Çok Alıntı Yapılan Kitaplar
+    const topList = document.getElementById('top-books-list');
+    if (topList) {
+        topList.innerHTML = '';
+        if (data.top_kitaplar && data.top_kitaplar.length > 0) {
+            data.top_kitaplar.forEach((b, idx) => {
+                const item = document.createElement('div');
+                item.className = 'top-book-item';
+                item.innerHTML = `
+                    <div class="top-book-rank">#${idx + 1}</div>
+                    <div class="top-book-info">
+                        <strong class="top-book-title">${b.kitap_adi}</strong>
+                        <small class="top-book-author">${b.yazar}</small>
+                    </div>
+                    <div class="top-book-count">💬 ${b.islem_sayisi} Not/Alıntı</div>
+                `;
+                topList.appendChild(item);
+            });
+        } else {
+            topList.innerHTML = '<p class="bos-mesaj">Henüz not veya alıntı verisi yok.</p>';
+        }
+    }
+}
+
+function isiHaritasiOlustur(gunlukAktivite) {
+    const container = document.getElementById('heatmap-container');
+    const tooltip = document.getElementById('heatmap-tooltip');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    // Bugünden geriye doğru 52 hafta (364 gün) hesapla
+    const bugun = new Date();
+    const gunler = [];
+    
+    for (let i = 363; i >= 0; i--) {
+        const d = new Date(bugun);
+        d.setDate(d.getDate() - i);
+        const iso = d.toISOString().split('T')[0];
+        const count = gunlukAktivite[iso] || 0;
+        gunler.push({ date: iso, dateObj: d, count: count });
+    }
+
+    // 52 haftalık kolonlar halinde oluştur
+    const haftaSayisi = 52;
+    for (let w = 0; w < haftaSayisi; w++) {
+        const col = document.createElement('div');
+        col.className = 'heatmap-col';
+
+        for (let day = 0; day < 7; day++) {
+            const idx = w * 7 + day;
+            if (idx >= gunler.length) break;
+
+            const g = gunler[idx];
+            const box = document.createElement('div');
+            
+            let lvl = 'lvl-0';
+            if (g.count >= 10) lvl = 'lvl-4';
+            else if (g.count >= 5) lvl = 'lvl-3';
+            else if (g.count >= 2) lvl = 'lvl-2';
+            else if (g.count >= 1) lvl = 'lvl-1';
+
+            box.className = `heat-box ${lvl}`;
+            box.setAttribute('data-date', g.date);
+            box.setAttribute('data-count', g.count);
+
+            box.addEventListener('mouseenter', (e) => {
+                if (tooltip) {
+                    const rect = e.target.getBoundingClientRect();
+                    const formattedDate = new Date(g.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' });
+                    tooltip.innerHTML = `<strong>${g.count} alıntı / yer imi</strong><br><small>${formattedDate}</small>`;
+                    tooltip.style.left = `${e.clientX + 10}px`;
+                    tooltip.style.top = `${e.clientY - 35}px`;
+                    tooltip.style.display = 'block';
+                }
+            });
+
+            box.addEventListener('mouseleave', () => {
+                if (tooltip) tooltip.style.display = 'none';
+            });
+
+            col.appendChild(box);
+        }
+
+        container.appendChild(col);
+    }
+}
+
 function toastGoster(mesaj, tip = 'info') {
     const toast = document.getElementById('toast-notification');
     if (!toast) return;

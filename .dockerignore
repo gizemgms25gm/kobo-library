@@ -1,0 +1,12 @@
+.git
+.gitignore
+.vscode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.DS_Store
+*.sqlite-journal
+test_*.py
+scratch

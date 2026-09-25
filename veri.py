@@ -758,6 +758,110 @@ def api_kitaplar():
     return jsonify(kobo_kitaplarini_getir())
 
 
+@app.route('/api/istatistikler')
+def api_istatistikler():
+    """Kobo okuma süreleri, kitap durumları ve son 365 günün aktivite ısı haritasını döner."""
+    if not os.path.exists(DB_PATH):
+        return jsonify({"hata": "Veritabanı bulunamadı"}), 404
+
+    ayarlar = ayarlari_yukle()
+    sadece_indirilenler = ayarlar.get("sadece_indirilenler", True)
+
+    filtre_sql = ""
+    if sadece_indirilenler:
+        filtre_sql = "AND (c.IsDownloaded = 'true' OR c.IsDownloaded = 1 OR c.IsDownloaded = '1' OR c.___FileSize > 0 OR c.ContentID LIKE 'file://%')"
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # 1. Kitap ve Okuma Durumları
+    c.execute(f'''
+        SELECT 
+            COUNT(*),
+            SUM(CASE WHEN c.ReadStatus = 2 OR c.___PercentRead = 100 THEN 1 ELSE 0 END) as bitti,
+            SUM(CASE WHEN (c.ReadStatus = 1 OR (c.___PercentRead > 0 AND c.___PercentRead < 100)) AND (c.ReadStatus != 2 OR c.ReadStatus IS NULL) THEN 1 ELSE 0 END) as okunuyor,
+            SUM(CASE WHEN (c.ReadStatus = 0 OR c.ReadStatus IS NULL) AND (c.___PercentRead = 0 OR c.___PercentRead IS NULL) THEN 1 ELSE 0 END) as okunmadi,
+            SUM(COALESCE(c.TimeSpentReading, 0)) as total_seconds
+        FROM content c
+        WHERE c.ContentType = 6 AND c.Title IS NOT NULL AND c.BookID IS NULL
+        {filtre_sql}
+    ''')
+    toplam_kitap, bitti, okunuyor, okunmadi, total_seconds = c.fetchone()
+    toplam_kitap = toplam_kitap or 0
+    bitti = bitti or 0
+    okunuyor = okunuyor or 0
+    okunmadi = okunmadi or 0
+    total_seconds = total_seconds or 0
+
+    toplam_saat = round(total_seconds / 3600, 1)
+    toplam_dakika = int(total_seconds // 60)
+
+    # 2. Alıntı, Not, Yer İmi Sayıları
+    c.execute(f'''
+        SELECT 
+            COUNT(CASE WHEN LOWER(b.Type) = 'highlight' OR (b.Text IS NOT NULL AND b.Text != '' AND (b.Annotation IS NULL OR b.Annotation = '')) THEN 1 END) as alinti_sayisi,
+            COUNT(CASE WHEN LOWER(b.Type) = 'note' OR (b.Annotation IS NOT NULL AND b.Annotation != '') THEN 1 END) as not_sayisi,
+            COUNT(CASE WHEN LOWER(b.Type) = 'bookmark' OR LOWER(b.Type) = 'dogear' OR ((b.Text IS NULL OR b.Text = '') AND (b.Annotation IS NULL OR b.Annotation = '')) THEN 1 END) as yer_imi_sayisi
+        FROM Bookmark b
+        JOIN content c ON (b.VolumeID = c.ContentID OR b.VolumeID LIKE '%' || c.Title || '%')
+        WHERE c.ContentType = 6 AND c.Title IS NOT NULL AND c.BookID IS NULL
+        {filtre_sql}
+    ''')
+    toplam_alinti, toplam_not, toplam_yer_imi = c.fetchone()
+    toplam_alinti = toplam_alinti or 0
+    toplam_not = toplam_not or 0
+    toplam_yer_imi = toplam_yer_imi or 0
+
+    # 3. Günlük Aktivite Haritası (Son 365 Gün)
+    c.execute(f'''
+        SELECT SUBSTR(b.DateCreated, 1, 10) as gun, COUNT(*) as adet
+        FROM Bookmark b
+        JOIN content c ON (b.VolumeID = c.ContentID OR b.VolumeID LIKE '%' || c.Title || '%')
+        WHERE b.DateCreated IS NOT NULL AND b.DateCreated != ''
+          AND c.ContentType = 6 AND c.Title IS NOT NULL AND c.BookID IS NULL
+          {filtre_sql}
+        GROUP BY gun
+        ORDER BY gun ASC
+    ''')
+    gunluk_aktivite = dict(c.fetchall())
+
+    # 4. En Çok Alıntı/Not Alınan 5 Kitap
+    c.execute(f'''
+        SELECT c.Title, c.Attribution, COUNT(b.BookmarkID) as islem_sayisi
+        FROM content c
+        JOIN Bookmark b ON (b.VolumeID = c.ContentID OR b.VolumeID LIKE '%' || c.Title || '%')
+        WHERE c.ContentType = 6 AND c.Title IS NOT NULL AND c.BookID IS NULL
+        {filtre_sql}
+        GROUP BY c.ContentID
+        ORDER BY islem_sayisi DESC
+        LIMIT 5
+    ''')
+    top_kitaplar = []
+    for raw_title, raw_author, count in c.fetchall():
+        temiz_t, temiz_a, _ = baslik_ve_yazar_temizle(raw_title, raw_author)
+        top_kitaplar.append({
+            "kitap_adi": temiz_t,
+            "yazar": temiz_a,
+            "islem_sayisi": count
+        })
+
+    conn.close()
+
+    return jsonify({
+        "toplam_kitap": toplam_kitap,
+        "bitti": bitti,
+        "okunuyor": okunuyor,
+        "okunmadi": okunmadi,
+        "toplam_saat": toplam_saat,
+        "toplam_dakika": toplam_dakika,
+        "toplam_alinti": toplam_alinti,
+        "toplam_not": toplam_not,
+        "toplam_yer_imi": toplam_yer_imi,
+        "gunluk_aktivite": gunluk_aktivite,
+        "top_kitaplar": top_kitaplar
+    })
+
+
 @app.route('/api/ayarlar', methods=['GET', 'POST'])
 def api_ayarlar():
     if request.method == 'POST':

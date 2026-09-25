@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  kobo-library:
+    build: .
+    container_name: kobo-library
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # Veritabanı ve ayarların kalıcılığı
+      - ./KoboReaderData_Deneme.sqlite:/app/KoboReaderData_Deneme.sqlite
+      - ./kobo_config.json:/app/kobo_config.json
+      # EPUB kitapları ve kapak resimleri
+      - ./books:/app/books
+      - ./static/covers:/app/static/covers
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FLASK_ENV=production
