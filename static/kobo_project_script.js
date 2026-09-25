@@ -224,40 +224,81 @@ function detayListesiniCiz() {
         }
 
         const kopyalanacakMetin = item.alinti_metni || item.kullanici_notu || '';
-        const kopyalaBtnHTML = kopyalanacakMetin ? `
-            <button class="btn-alinti-kopyala" onclick="event.stopPropagation(); metinKopyala(this, ${JSON.stringify(kopyalanacakMetin)})" title="Alıntıyı Panoya Kopyala">
-                📋 Kopyala
-            </button>
-        ` : '';
 
         kart.innerHTML = `
             ${icerikHTML}
             <div class="alinti-meta">
                 <span class="konum-etiket">${item.ilerleme ? '📍 ' + item.ilerleme : ''}</span>
                 <div class="alinti-meta-sag">
-                    ${kopyalaBtnHTML}
+                    ${kopyalanacakMetin ? '<button type="button" class="btn-alinti-kopyala" title="Alıntıyı Panoya Kopyala">📋 Kopyala</button>' : ''}
                     <span class="tarih-etiket">${item.tarih ? '🕒 ' + item.tarih : ''}</span>
                 </div>
             </div>
         `;
+
+        if (kopyalanacakMetin) {
+            const btnKopyala = kart.querySelector('.btn-alinti-kopyala');
+            if (btnKopyala) {
+                btnKopyala.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    metinKopyala(btnKopyala, kopyalanacakMetin);
+                });
+            }
+        }
+
         alintiListesi.appendChild(kart);
     });
 }
 
 function metinKopyala(btn, metin) {
-    if (!metin) return;
-    navigator.clipboard.writeText(metin).then(() => {
-        const eskiHTML = btn.innerHTML;
-        btn.innerHTML = '✅ Kopyalandı';
-        btn.style.color = '#34c759';
-        toastGoster("Alıntı panoya kopyalandı!", "success");
-        setTimeout(() => {
-            btn.innerHTML = eskiHTML;
-            btn.style.color = '';
-        }, 2000);
-    }).catch(() => {
-        toastGoster("Panoya kopyalanamadı.", "error");
-    });
+    if (!metin) {
+        toastGoster("Kopyalanacak metin bulunamadı.", "error");
+        return;
+    }
+
+    function basariyiIsle() {
+        if (btn) {
+            const eskiHTML = btn.innerHTML;
+            btn.innerHTML = '✅ Kopyalandı';
+            btn.style.color = '#34c759';
+            setTimeout(() => {
+                btn.innerHTML = eskiHTML;
+                btn.style.color = '';
+            }, 2000);
+        }
+        toastGoster("📋 Alıntı panoya kopyalandı!", "success");
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(metin)
+            .then(() => basariyiIsle())
+            .catch(() => fallbackKopyala(metin, basariyiIsle));
+    } else {
+        fallbackKopyala(metin, basariyiIsle);
+    }
+}
+
+function fallbackKopyala(metin, onBasari) {
+    try {
+        const textArea = document.createElement("textarea");
+        textArea.value = metin;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        textArea.setAttribute("readonly", "");
+        document.body.appendChild(textArea);
+        textArea.select();
+        const basarili = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (basarili && onBasari) {
+            onBasari();
+        } else if (!basarili) {
+            toastGoster("Panoya kopyalama başarısız oldu.", "error");
+        }
+    } catch (err) {
+        console.error("Kopyalama hatası:", err);
+        toastGoster("Panoya kopyalama başarısız oldu.", "error");
+    }
 }
 
 function detayGörünümünüAc(kitap) {
@@ -710,14 +751,19 @@ function isiHaritasiOlustur(gunlukAktivite) {
     }
 }
 
+let toastTimeout = null;
 function toastGoster(mesaj, tip = 'info') {
     const toast = document.getElementById('toast-notification');
     if (!toast) return;
 
+    if (toastTimeout) {
+        clearTimeout(toastTimeout);
+    }
+
     toast.innerText = mesaj;
     toast.className = `toast-notification show ${tip}`;
 
-    setTimeout(() => {
+    toastTimeout = setTimeout(() => {
         toast.className = 'toast-notification';
-    }, 5500);
+    }, 2800);
 }

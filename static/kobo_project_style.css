@@ -1037,3 +1037,48 @@ body.dark-mode .top-book-item {
     font-weight: 600;
     color: var(--note-color);
 }
+
+/* Alt Bildirim (Toast Notification) */
+.toast-notification {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translate(-50%, 20px) scale(0.95);
+    background: rgba(28, 28, 30, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: #ffffff;
+    padding: 10px 22px;
+    border-radius: 30px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 999999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-notification.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0) scale(1);
+    pointer-events: auto;
+}
+
+.toast-notification.success {
+    border-left: 3px solid #34c759;
+}
+
+.toast-notification.error {
+    border-left: 3px solid #ff3b30;
+}
+
+.toast-notification.info {
+    border-left: 3px solid #007aff;
+}
