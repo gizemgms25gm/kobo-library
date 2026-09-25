@@ -133,6 +133,16 @@ function kitapDetayGoster(kitap) {
                 if (detayKapakImg) detayKapakImg.src = data.kapak_url;
             }
 
+            // Sayfa sayısını ve rozeti güncelle
+            if (data.toplam_sayfa !== undefined) {
+                kitap.toplam_sayfa = data.toplam_sayfa;
+                kitap.sayfa_sayisi = data.toplam_sayfa > 0 ? `${data.toplam_sayfa} sayfa` : '—';
+                const sayfaRozet = document.getElementById('detay-sayfa-bilgi');
+                if (sayfaRozet) {
+                    sayfaRozet.innerText = data.toplam_sayfa > 0 ? `📖 ${data.toplam_sayfa} sayfa` : '';
+                }
+            }
+
             // EPUB indirme butonunu yönet
             const epubBtn = document.getElementById('btn-download-epub');
             if (epubBtn) {
@@ -524,9 +534,12 @@ function ayarlariKaydet() {
     .then(res => res.json())
     .then(data => {
         if (data.basarili) {
-            toastGoster("⚙️ Ayarlar ve Google Drive bağlantısı kaydedildi!", "success");
+            toastGoster("⚙️ Ayarlar başarıyla uygulandı!", "success");
             ayarlariKapat();
             kitaplariYukle();
+            if (aktifKitap) {
+                kitapDetayGoster(aktifKitap);
+            }
         } else {
             toastGoster("Ayarlar kaydedilirken hata oluştu.", "error");
         }
