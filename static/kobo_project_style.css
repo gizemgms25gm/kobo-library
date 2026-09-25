@@ -360,12 +360,52 @@ input:checked + .slider:before { transform: translateX(20px); }
     box-shadow: 0 6px 16px rgba(0, 122, 255, 0.35);
 }
 
-/* Filtre Sekmeleri */
+/* Filtre ve Sıralama Satırı */
+.filter-sort-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
 .filter-tabs {
     display: flex;
     gap: 8px;
-    margin-top: 15px;
     flex-wrap: wrap;
+}
+
+.sort-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 4px 10px;
+    border-radius: 18px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.sort-icon {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.sort-select {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    font-size: 0.78rem;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+body.dark-mode .sort-select option {
+    background: #252525;
+    color: #f0f0f0;
 }
 
 .filter-tab {

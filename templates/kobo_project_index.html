@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kobo Library</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='kobo_project_style.css') }}?v=3.1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='kobo_project_style.css') }}?v=3.2">
 </head>
 <body>
 
@@ -268,11 +268,22 @@
                 </div>
             </div>
 
-            <div class="filter-tabs">
-                <button class="filter-tab active" data-filter="all" onclick="filtreDegistir('all', this)">Tümü (<span id="count-all">0</span>)</button>
-                <button class="filter-tab" data-filter="alinti" onclick="filtreDegistir('alinti', this)">💬 Alıntılar (<span id="count-alinti">0</span>)</button>
-                <button class="filter-tab" data-filter="not" onclick="filtreDegistir('not', this)">📝 Notlar (<span id="count-not">0</span>)</button>
-                <button class="filter-tab" data-filter="yer_imi" onclick="filtreDegistir('yer_imi', this)">🔖 Yer İmleri (<span id="count-yer_imi">0</span>)</button>
+            <div class="filter-sort-row">
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all" onclick="filtreDegistir('all', this)">Tümü (<span id="count-all">0</span>)</button>
+                    <button class="filter-tab" data-filter="alinti" onclick="filtreDegistir('alinti', this)">💬 Alıntılar (<span id="count-all">0</span>)</button>
+                    <button class="filter-tab" data-filter="not" onclick="filtreDegistir('not', this)">📝 Notlar (<span id="count-not">0</span>)</button>
+                    <button class="filter-tab" data-filter="yer_imi" onclick="filtreDegistir('yer_imi', this)">🔖 Yer İmleri (<span id="count-yer_imi">0</span>)</button>
+                </div>
+
+                <div class="sort-control">
+                    <span class="sort-icon">⇅</span>
+                    <select id="detail-sort-select" class="sort-select" onchange="siralamaDegistir(this.value)" title="Alıntı ve notların sıralama düzenini değiştirin">
+                        <option value="kronolojik_yeni">🕒 En Yeni → En Eski (Sondan Başa)</option>
+                        <option value="kronolojik_eski">🕒 En Eski → En Yeni (Baştan Sona)</option>
+                        <option value="kitap_sirasi">📖 Kitaptaki İlerleme Sırası (% / Sayfa)</option>
+                    </select>
+                </div>
             </div>
 
             <hr class="detay-ayrac">
@@ -284,6 +295,6 @@
 
     </main>
 
-    <script src="{{ url_for('static', filename='kobo_project_script.js') }}?v=3.1"></script>
+    <script src="{{ url_for('static', filename='kobo_project_script.js') }}?v=3.2"></script>
 </body>
 </html>

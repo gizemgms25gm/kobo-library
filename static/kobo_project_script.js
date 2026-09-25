@@ -175,6 +175,8 @@ function kitapDetayGoster(kitap) {
         });
 }
 
+let aktifSiralama = 'kronolojik_yeni';
+
 function filtreDegistir(tur, element) {
     aktifFiltre = tur;
     
@@ -184,13 +186,32 @@ function filtreDegistir(tur, element) {
     detayListesiniCiz();
 }
 
+function siralamaDegistir(yeniSira) {
+    aktifSiralama = yeniSira;
+    detayListesiniCiz();
+}
+
 function detayListesiniCiz() {
     const alintiListesi = document.getElementById('alinti-not-listesi');
     alintiListesi.innerHTML = '';
 
-    let gosterilecekler = aktifDetaylar;
+    let gosterilecekler = [...aktifDetaylar];
+
+    // Sıralama uygula
+    if (aktifSiralama === 'kronolojik_yeni') {
+        // En yeni en başta (Sondan başa)
+        gosterilecekler.sort((a, b) => (b.ham_tarih || '').localeCompare(a.ham_tarih || ''));
+    } else if (aktifSiralama === 'kronolojik_eski') {
+        // En eski en başta (Baştan sona)
+        gosterilecekler.sort((a, b) => (a.ham_tarih || '').localeCompare(b.ham_tarih || ''));
+    } else if (aktifSiralama === 'kitap_sirasi') {
+        // Kitaptaki ilerleme/sayfa sırasına göre
+        gosterilecekler.sort((a, b) => (a.progress_degeri || 0) - (b.progress_degeri || 0));
+    }
+
+    // Filtre uygula
     if (aktifFiltre !== 'all') {
-        gosterilecekler = aktifDetaylar.filter(d => d.tur === aktifFiltre);
+        gosterilecekler = gosterilecekler.filter(d => d.tur === aktifFiltre);
     }
 
     if (gosterilecekler.length === 0) {

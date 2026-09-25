@@ -1201,6 +1201,8 @@ def api_kitap_detay(volume_id):
             "alinti_metni": text if text else "",
             "kullanici_notu": annotation if annotation else "",
             "tarih": tarih_formatla(date_created),
+            "ham_tarih": date_created if date_created else "",
+            "progress_degeri": progress if (progress is not None and isinstance(progress, (int, float))) else 0,
             "ilerleme": ilerleme_metni,
             "bolum": bolum_adi_temiz
         })
