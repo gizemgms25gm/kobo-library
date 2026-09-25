@@ -24,6 +24,8 @@ except ImportError:
     GOOGLE_API_MEVCUT = False
 
 app = Flask(__name__, static_folder='static')
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'KoboReaderData_Deneme.sqlite')
