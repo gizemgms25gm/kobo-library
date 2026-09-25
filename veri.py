@@ -73,7 +73,7 @@ def ayarlari_yukle():
         "ozel_yedek_klasoru": "",
         "github_yedek_aktif": True,
         "sadece_indirilenler": True,  # Yalnızca Kobo'da yüklü gerçek kitapları göster
-        "sayfa_hesap_modu": "kobo_kelime"  # 'kobo_kelime', 'internet', 'sadece_yuzde'
+        "sayfa_hesap_modu": "internet"  # 'internet' (Varsayılan basılı sayfa), 'kobo_kelime'
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -1143,17 +1143,22 @@ def api_kitap_detay(volume_id):
         )
 
     sorgu = """
-    SELECT Type, Text, Annotation, DateCreated, ChapterProgress
-    FROM Bookmark
-    WHERE VolumeID = ? OR VolumeID LIKE ?
-    ORDER BY DateCreated DESC
+    SELECT b.Type, b.Text, b.Annotation, b.DateCreated, b.ChapterProgress,
+           (SELECT toc.Title FROM content toc 
+            WHERE (toc.BookID = b.VolumeID OR toc.ContentID LIKE '%' || b.VolumeID || '%') 
+              AND (toc.ContentID = b.ContentID OR toc.ContentID LIKE b.ContentID || '%' OR b.ContentID LIKE toc.ContentID || '%') 
+              AND toc.ContentType = '899' 
+            LIMIT 1) as bolum_adi
+    FROM Bookmark b
+    WHERE b.VolumeID = ? OR b.VolumeID LIKE ?
+    ORDER BY b.DateCreated DESC
     """
     imlec.execute(sorgu, (volume_id, f"%{volume_id}%"))
     satirlar = imlec.fetchall()
     baglanti.close()
     
     detay_listesi = []
-    for item_type, text, annotation, date_created, progress in satirlar:
+    for item_type, text, annotation, date_created, progress, bolum_adi in satirlar:
         item_type_lower = (item_type or "").lower()
         has_note = (annotation is not None and annotation.strip() != '') or item_type_lower == 'note'
         has_highlight = (text is not None and text.strip() != '') or item_type_lower == 'highlight'
@@ -1165,21 +1170,37 @@ def api_kitap_detay(volume_id):
         else:
             tur = "yer_imi"
         
-        ilerleme_metni = ""
+        bolum_adi_temiz = ""
+        if bolum_adi:
+            b_str = str(bolum_adi).strip()
+            if b_str.isdigit():
+                bolum_adi_temiz = f"Bölüm {b_str}"
+            elif b_str.lower().startswith("chapter"):
+                bolum_adi_temiz = b_str.replace("Chapter", "Bölüm").replace("chapter", "Bölüm")
+            elif not b_str.lower().endswith(('.html', '.xhtml', '.htm')):
+                bolum_adi_temiz = b_str
+
+        parcalar = []
         if progress is not None and isinstance(progress, (int, float)):
             yuzde = int(round(progress * 100))
-            if toplam_sayfa > 0:
-                hesaplanan_sayfa = max(1, int(round(progress * toplam_sayfa)))
-                ilerleme_metni = f"%{yuzde} - Sayfa {hesaplanan_sayfa}"
-            else:
-                ilerleme_metni = f"%{yuzde}"
+            parcalar.append(f"%{yuzde}")
+
+        if bolum_adi_temiz:
+            parcalar.append(bolum_adi_temiz)
+
+        if progress is not None and isinstance(progress, (int, float)) and toplam_sayfa > 0:
+            hesaplanan_sayfa = max(1, int(round(progress * toplam_sayfa)))
+            parcalar.append(f"Sayfa {hesaplanan_sayfa}")
+
+        ilerleme_metni = " • ".join(parcalar)
 
         detay_listesi.append({
             "tur": tur,
             "alinti_metni": text if text else "",
             "kullanici_notu": annotation if annotation else "",
             "tarih": tarih_formatla(date_created),
-            "ilerleme": ilerleme_metni
+            "ilerleme": ilerleme_metni,
+            "bolum": bolum_adi_temiz
         })
         
     temiz_baslik, temiz_yazar, _ = baslik_ve_yazar_temizle(title, author if kitap_bilgi else "")

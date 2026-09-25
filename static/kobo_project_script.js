@@ -223,14 +223,40 @@ function detayListesiniCiz() {
             }
         }
 
+        const kopyalanacakMetin = item.alinti_metni || item.kullanici_notu || '';
+        const kopyalaBtnHTML = kopyalanacakMetin ? `
+            <button class="btn-alinti-kopyala" onclick="event.stopPropagation(); metinKopyala(this, ${JSON.stringify(kopyalanacakMetin)})" title="Alıntıyı Panoya Kopyala">
+                📋 Kopyala
+            </button>
+        ` : '';
+
         kart.innerHTML = `
             ${icerikHTML}
             <div class="alinti-meta">
                 <span class="konum-etiket">${item.ilerleme ? '📍 ' + item.ilerleme : ''}</span>
-                <span class="tarih-etiket">${item.tarih ? '🕒 ' + item.tarih : ''}</span>
+                <div class="alinti-meta-sag">
+                    ${kopyalaBtnHTML}
+                    <span class="tarih-etiket">${item.tarih ? '🕒 ' + item.tarih : ''}</span>
+                </div>
             </div>
         `;
         alintiListesi.appendChild(kart);
+    });
+}
+
+function metinKopyala(btn, metin) {
+    if (!metin) return;
+    navigator.clipboard.writeText(metin).then(() => {
+        const eskiHTML = btn.innerHTML;
+        btn.innerHTML = '✅ Kopyalandı';
+        btn.style.color = '#34c759';
+        toastGoster("Alıntı panoya kopyalandı!", "success");
+        setTimeout(() => {
+            btn.innerHTML = eskiHTML;
+            btn.style.color = '';
+        }, 2000);
+    }).catch(() => {
+        toastGoster("Panoya kopyalanamadı.", "error");
     });
 }
 
@@ -443,7 +469,6 @@ function ayarlariAc() {
         .then(res => res.json())
         .then(data => {
             const ayarlar = data.ayarlar || {};
-            document.getElementById('setting-page-mode').value = ayarlar.sayfa_hesap_modu || 'kobo_kelime';
             document.getElementById('setting-only-downloaded').checked = ayarlar.sadece_indirilenler !== false;
             document.getElementById('setting-gdrive-link').value = ayarlar.gdrive_klasor_linki || '';
             document.getElementById('setting-github-enabled').checked = ayarlar.github_yedek_aktif !== false;
@@ -518,7 +543,7 @@ function gdriveLinkDogrula() {
 
 function ayarlariKaydet() {
     const payload = {
-        sayfa_hesap_modu: document.getElementById('setting-page-mode').value,
+        sayfa_hesap_modu: 'internet',
         sadece_indirilenler: document.getElementById('setting-only-downloaded').checked,
         bulut_yedek_aktif: true,
         bulut_tipi: 'google_drive_link',

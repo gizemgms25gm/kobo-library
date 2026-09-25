@@ -38,6 +38,13 @@ body {
     gap: 15px;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
 .logo {
     font-size: 1.6rem;
     font-weight: 700;
@@ -50,6 +57,25 @@ body {
     font-style: italic;
     font-weight: 400;
     color: #c48b53;
+}
+
+.logo-note-badge {
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--border-color);
+    padding: 4px 10px;
+    border-radius: 12px;
+    letter-spacing: 0.2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    user-select: none;
+}
+
+body.dark-mode .logo-note-badge {
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .header-right {
@@ -428,9 +454,52 @@ input:checked + .slider:before { transform: translateX(20px); }
 .alinti-meta {
     display: flex;
     justify-content: space-between;
-    font-size: 0.72rem;
+    align-items: center;
+    font-size: 0.74rem;
     color: var(--text-muted);
     margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.konum-etiket {
+    font-weight: 600;
+    color: var(--text-color);
+    background: rgba(0, 0, 0, 0.04);
+    padding: 3px 8px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+body.dark-mode .konum-etiket {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.alinti-meta-sag {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-alinti-kopyala {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    transition: all 0.2s;
+}
+
+.btn-alinti-kopyala:hover {
+    color: var(--accent-color);
+    background: rgba(0, 122, 255, 0.1);
 }
 
 .bos-mesaj, .yukleniyor, .hata-mesaj {
