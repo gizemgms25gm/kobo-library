@@ -643,36 +643,33 @@ def kitap_meta_cozumle(kitap_ham):
     
     sayfa_sayisi_sayi = 0
     
-    if hesap_modu == "kobo_kelime":
+    if hesap_modu == "internet":
+        inet_sayfa, _ = internet_sayfa_ara(raw_title, raw_author)
+        if inet_sayfa:
+            sayfa_sayisi_sayi = inet_sayfa
+        elif store_pages and isinstance(store_pages, int) and store_pages > 0:
+            sayfa_sayisi_sayi = store_pages
+        elif num_pages and isinstance(num_pages, int) and num_pages > 0:
+            sayfa_sayisi_sayi = num_pages
+        elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
+            sayfa_sayisi_sayi = max(1, round(word_count / 260))
+    else:  # kobo_kelime (varsayılan)
         if store_pages and isinstance(store_pages, int) and store_pages > 0:
             sayfa_sayisi_sayi = store_pages
         elif num_pages and isinstance(num_pages, int) and num_pages > 0:
             sayfa_sayisi_sayi = num_pages
         elif word_count and isinstance(word_count, (int, float)) and word_count > 0:
             sayfa_sayisi_sayi = max(1, round(word_count / 260))
-    elif hesap_modu == "internet":
-        inet_sayfa, _ = internet_sayfa_ara(raw_title, raw_author)
-        if inet_sayfa:
-            sayfa_sayisi_sayi = inet_sayfa
-        elif store_pages and store_pages > 0:
-            sayfa_sayisi_sayi = store_pages
-    else:
-        sayfa_sayisi_sayi = 0
 
     if cache_key in CACHE_SOZLUGU:
         kapak_url = CACHE_SOZLUGU[cache_key]["kapak_url"]
     else:
         kapak_url = kapak_indir_ve_yerel_yol_dondur(raw_title, raw_author, image_id)
         CACHE_SOZLUGU[cache_key] = {
-            "kapak_url": kapak_url,
-            "sayfa_sayisi_sayi": sayfa_sayisi_sayi
+            "kapak_url": kapak_url
         }
 
-    if hesap_modu == "sadece_yuzde":
-        sayfa_metni = "—"
-    else:
-        sayfa_metni = f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—"
-        
+    sayfa_metni = f"{sayfa_sayisi_sayi} sayfa" if sayfa_sayisi_sayi > 0 else "—"
     epub_dosyasi = yerel_epub_dosyasi_bul(content_id, raw_title)
 
     return {
@@ -1017,19 +1014,23 @@ def api_kitap_detay(volume_id):
     title = ""
     if kitap_bilgi:
         title, author, num_pages, store_pages, total_words = kitap_bilgi
-        if hesap_modu == "kobo_kelime":
+        if hesap_modu == "internet":
+            inet_sayfa, _ = internet_sayfa_ara(title, author)
+            if inet_sayfa:
+                toplam_sayfa = inet_sayfa
+            elif store_pages and isinstance(store_pages, int) and store_pages > 0:
+                toplam_sayfa = store_pages
+            elif num_pages and isinstance(num_pages, int) and num_pages > 0:
+                toplam_sayfa = num_pages
+            elif total_words and isinstance(total_words, (int, float)) and total_words > 0:
+                toplam_sayfa = max(1, round(total_words / 260))
+        else:  # kobo_kelime (varsayılan)
             if store_pages and isinstance(store_pages, int) and store_pages > 0:
                 toplam_sayfa = store_pages
             elif num_pages and isinstance(num_pages, int) and num_pages > 0:
                 toplam_sayfa = num_pages
             elif total_words and isinstance(total_words, (int, float)) and total_words > 0:
                 toplam_sayfa = max(1, round(total_words / 260))
-        elif hesap_modu == "internet":
-            inet_sayfa, _ = internet_sayfa_ara(title, author)
-            if inet_sayfa:
-                toplam_sayfa = inet_sayfa
-            elif store_pages and store_pages > 0:
-                toplam_sayfa = store_pages
 
     sorgu = """
     SELECT Type, Text, Annotation, DateCreated, ChapterProgress
@@ -1057,7 +1058,7 @@ def api_kitap_detay(volume_id):
         ilerleme_metni = ""
         if progress is not None and isinstance(progress, (int, float)):
             yuzde = int(round(progress * 100))
-            if hesap_modu != "sadece_yuzde" and toplam_sayfa > 0:
+            if toplam_sayfa > 0:
                 hesaplanan_sayfa = max(1, int(round(progress * toplam_sayfa)))
                 ilerleme_metni = f"%{yuzde} - Sayfa {hesaplanan_sayfa}"
             else:
