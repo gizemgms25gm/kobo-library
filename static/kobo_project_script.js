@@ -259,14 +259,14 @@ function metinKopyala(btn, metin) {
     function basariyiIsle() {
         if (btn) {
             const eskiHTML = btn.innerHTML;
-            btn.innerHTML = '✅ Kopyalandı';
+            btn.innerHTML = '✓ Kopyalandı';
             btn.style.color = '#34c759';
             setTimeout(() => {
                 btn.innerHTML = eskiHTML;
                 btn.style.color = '';
-            }, 2000);
+            }, 1800);
         }
-        toastGoster("📋 Alıntı panoya kopyalandı!", "success");
+        toastGoster("✓ Kopyalandı", "success");
     }
 
     if (navigator.clipboard && window.isSecureContext) {
@@ -765,5 +765,5 @@ function toastGoster(mesaj, tip = 'info') {
 
     toastTimeout = setTimeout(() => {
         toast.className = 'toast-notification';
-    }, 2800);
+    }, 1800);
 }
