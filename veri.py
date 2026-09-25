@@ -1144,8 +1144,30 @@ def api_kitap_detay(volume_id):
             hesap_modu=hesap_modu
         )
 
+    # Kitap bölümleri ve kelime ofsetleri haritası
+    imlec.execute("""
+        SELECT ContentID, VolumeIndex, WordCount,
+               (SELECT COALESCE(SUM(w.WordCount), 0) FROM content w 
+                WHERE (w.BookID = c.BookID OR w.BookID = ?) 
+                  AND w.VolumeIndex < c.VolumeIndex 
+                  AND w.WordCount > 0) as prior_words
+        FROM content c
+        WHERE (c.BookID = ? OR c.BookID LIKE ? OR c.ContentID LIKE ?) 
+          AND c.ContentType = 9
+        ORDER BY c.VolumeIndex ASC
+    """, (volume_id, volume_id, f"%{volume_id}%", f"%{volume_id}%"))
+    chapter_rows = imlec.fetchall()
+    
+    chapter_map = {}
+    for cid, vidx, wc, pw in chapter_rows:
+        chapter_map[cid] = {
+            "volume_index": vidx,
+            "word_count": max(1, wc or 1),
+            "prior_words": pw or 0
+        }
+
     sorgu = """
-    SELECT b.Type, b.Text, b.Annotation, b.DateCreated, b.ChapterProgress,
+    SELECT b.Type, b.Text, b.Annotation, b.DateCreated, b.ChapterProgress, b.ContentID,
            (SELECT toc.Title FROM content toc 
             WHERE (toc.BookID = b.VolumeID OR toc.ContentID LIKE '%' || b.VolumeID || '%') 
               AND (toc.ContentID = b.ContentID OR toc.ContentID LIKE b.ContentID || '%' OR b.ContentID LIKE toc.ContentID || '%') 
@@ -1160,7 +1182,7 @@ def api_kitap_detay(volume_id):
     baglanti.close()
     
     detay_listesi = []
-    for item_type, text, annotation, date_created, progress, bolum_adi in satirlar:
+    for item_type, text, annotation, date_created, progress, b_content_id, bolum_adi in satirlar:
         item_type_lower = (item_type or "").lower()
         has_note = (annotation is not None and annotation.strip() != '') or item_type_lower == 'note'
         has_highlight = (text is not None and text.strip() != '') or item_type_lower == 'highlight'
@@ -1182,16 +1204,30 @@ def api_kitap_detay(volume_id):
             elif not b_str.lower().endswith(('.html', '.xhtml', '.htm')):
                 bolum_adi_temiz = b_str
 
-        parcalar = []
-        if progress is not None and isinstance(progress, (int, float)):
-            yuzde = int(round(progress * 100))
-            parcalar.append(f"%{yuzde}")
+        # Kitap genelindeki gerçek ilerleme yüzdesini hesapla
+        ch_info = chapter_map.get(b_content_id)
+        if not ch_info and b_content_id:
+            for k, v in chapter_map.items():
+                if b_content_id in k or k in b_content_id:
+                    ch_info = v
+                    break
+
+        global_progress = 0
+        if ch_info and total_words and total_words > 0:
+            cp_val = progress if (progress is not None and isinstance(progress, (int, float))) else 0
+            exact_words = ch_info["prior_words"] + (cp_val * ch_info["word_count"])
+            global_progress = min(1.0, max(0.0, exact_words / total_words))
+        elif progress is not None and isinstance(progress, (int, float)):
+            global_progress = min(1.0, max(0.0, progress))
+
+        yuzde = int(round(global_progress * 100))
+        parcalar = [f"%{yuzde}"]
 
         if bolum_adi_temiz:
             parcalar.append(bolum_adi_temiz)
 
-        if progress is not None and isinstance(progress, (int, float)) and toplam_sayfa > 0:
-            hesaplanan_sayfa = max(1, int(round(progress * toplam_sayfa)))
+        if toplam_sayfa > 0:
+            hesaplanan_sayfa = max(1, min(toplam_sayfa, int(round(global_progress * toplam_sayfa))))
             parcalar.append(f"Sayfa {hesaplanan_sayfa}")
 
         ilerleme_metni = " • ".join(parcalar)
@@ -1202,7 +1238,7 @@ def api_kitap_detay(volume_id):
             "kullanici_notu": annotation if annotation else "",
             "tarih": tarih_formatla(date_created),
             "ham_tarih": date_created if date_created else "",
-            "progress_degeri": progress if (progress is not None and isinstance(progress, (int, float))) else 0,
+            "progress_degeri": global_progress,
             "ilerleme": ilerleme_metni,
             "bolum": bolum_adi_temiz
         })
